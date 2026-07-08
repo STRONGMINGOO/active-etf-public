@@ -409,13 +409,20 @@ const NON_COMMON_STOCK_CODES = new Set(["CASH", "KRW", "USD", "JPY", "CNY", "HKD
 const NON_COMMON_STOCK_KEYWORDS = [
   "현금", "예금", "미수금", "미지급", "스왑", "SWAP", "TRS",
   "채권", "국고", "국채", "통안", "회사채", "금융채", "산금채", "특수채",
-  "전자단기사채", "단기사채", "기업어음", "(단)", "TREASURY", "BOND", "NOTE", "T-BILL",
-  "선물", "옵션", "FUTURE", "FUTURES", "CALL", "PUT", "INDEX",
+  "전자단기사채", "단기사채", "기업어음", "(단)", "FLOAT", "FRN", "TREASURY", "BOND", "NOTE", "T-BILL",
+  "BILL", "KTB", "KORGAS", "선물", "옵션", "위클리", "만기", "FUTR", "FUTURE", "FUTURES",
+  "INDX", "CALL", "PUT", "INDEX", "외국환포워드", "FXFWD",
   "ETF", "ETN", "펀드", "FUND",
 ];
 const NON_COMMON_STOCK_PREFIXES = ["KODEX ", "TIGER ", "RISE ", "SOL ", "PLUS ", "ACE ", "TIMEFOLIO ", "KOACT "];
 const NON_COMMON_STOCK_PATTERNS = [
   /\b[A-Z]{2,}\b.*\b\d+(?:\s+\d+\/\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\bT\s+\d+(?:\.\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\b[A-Z]{1,8}\s+(?:FLOAT\s+)?\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\bT\s+\d+(?:\s+\d+\/\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\bB\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /\b[A-Z]{1,8}\s+US\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+[CP]\d/,
+  /\b\d{1,2}\/\d{1,2}\/\d{2,4}\s+[CP]\d/,
   /20\d{6}-\d+-\d+\(단\)/,
   /\b[CP]\s*20\d{4}\b/,
   /\b[CP]\d{3,}\b/,
