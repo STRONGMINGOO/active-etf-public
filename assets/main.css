@@ -1,0 +1,805 @@
+/* Reset & base */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+[hidden] { display: none !important; }
+
+/* Launch overlay — covers the empty dashboard during initial bootstrap + overview fetch.
+ * Defined early so it renders even before main.css is fully parsed below the fold. */
+.launch-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg, #f8fafc);
+  transition: opacity 240ms ease;
+}
+.launch-overlay.fade-out { opacity: 0; pointer-events: none; }
+.launch-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 36px 56px;
+  /* 카드 폭은 가장 긴 라인(보통 hint)에 맞춰 자동 확장 — 작은 화면에서만 90vw로 캡.
+   * 이전에는 max-width: 420px이 강제 wrap을 유발해서 hint가 3줄로 잘림. */
+  max-width: 90vw;
+  text-align: center;
+}
+.launch-spinner {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 3px solid var(--border, #e2e8f0);
+  border-top-color: var(--brand, #2563eb);
+  animation: launch-spin 900ms linear infinite;
+}
+@keyframes launch-spin { to { transform: rotate(360deg); } }
+.launch-title { font-size: 20px; font-weight: 700; color: var(--text, #0f172a); letter-spacing: -0.01em; }
+.launch-status { font-size: 14px; color: var(--text-muted, #475569); font-weight: 500; }
+.launch-hint { font-size: 12px; color: var(--text-faint, #94a3b8); line-height: 1.5; white-space: nowrap; }
+.launch-overlay.error .launch-spinner {
+  border-top-color: var(--negative, #dc2626);
+  animation: none;
+}
+.launch-retry {
+  margin-top: 8px;
+  padding: 8px 20px;
+  border-radius: 6px;
+  border: 1px solid var(--brand, #2563eb);
+  background: var(--brand, #2563eb);
+  color: white;
+  font-size: 13px;
+  font-weight: 500;
+}
+.launch-retry:hover { filter: brightness(1.08); }
+body {
+  font: var(--fs-base)/var(--lh-normal) var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
+button { font: inherit; cursor: pointer; }
+table { border-collapse: collapse; width: 100%; }
+input, select { font: inherit; color: inherit; }
+code { font-family: var(--font-mono); font-size: 0.92em; }
+
+/* Layout */
+.topbar {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: var(--s-5);
+  align-items: center;
+  padding: var(--s-3) var(--s-5);
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+}
+.brand-mark {
+  color: var(--brand);
+  font-size: 18px;
+  line-height: 1;
+}
+.brand strong {
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.brand-meta {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+  margin-left: var(--s-2);
+}
+.provider-tabs {
+  display: flex;
+  gap: var(--s-1);
+  padding: 2px;
+  background: var(--surface-alt);
+  border-radius: var(--r-md);
+}
+.provider-tabs button {
+  padding: var(--s-2) var(--s-3);
+  background: transparent;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.provider-tabs button:hover { color: var(--text); background: var(--surface-hover); }
+.provider-tabs button[aria-current="true"] {
+  background: var(--surface);
+  color: var(--brand);
+  box-shadow: var(--shadow-card);
+}
+.provider-tabs button.favorites-tab {
+  margin-left: var(--s-2);
+  border-left: 1px solid var(--border);
+  padding-left: var(--s-3);
+  color: var(--accent, #f5a623);
+}
+.provider-tabs button.favorites-tab[aria-current="true"] {
+  color: var(--accent, #f5a623);
+  background: var(--surface);
+}
+
+/* 로딩 중인 provider 탭: 라벨 옆에 작은 회전 spinner + 살짝 dim. 사용자가 어떤 탭을
+ * 클릭했고 데이터가 도착하기 전이라는 점을 즉시 알 수 있게 함 (cold path 30~60초 대응). */
+.provider-tabs button.is-loading::after {
+  content: "";
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-left: 6px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  vertical-align: -1px;
+  animation: launch-spin 800ms linear infinite;
+}
+.provider-tabs button.is-loading { opacity: 0.85; cursor: progress; }
+.provider-badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  color: var(--text-muted);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.provider-badge.sm { padding: 0 6px; }
+.feed-row.with-date.with-provider { grid-template-columns: 90px auto 80px 1fr auto auto; }
+.view-tabs {
+  display: flex;
+  gap: var(--s-1);
+}
+.view-tab {
+  padding: var(--s-2) var(--s-4);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: color var(--t-fast), border-color var(--t-fast);
+}
+.view-tab:hover { color: var(--text); }
+.view-tab[aria-current="true"] {
+  color: var(--text);
+  border-bottom-color: var(--brand);
+}
+.topbar-status { display: flex; gap: var(--s-2); }
+
+.content {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-5);
+}
+.view { display: flex; flex-direction: column; gap: var(--s-5); }
+
+/* Cards */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-card);
+  padding: var(--s-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.card.span-2 { grid-column: span 2; }
+.card-inner {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.card-inner.side { gap: var(--s-2); }
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-3);
+}
+.card-head.compact h3 {
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.card-head h2 {
+  margin: 0;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.card-head h3 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+/* KPI strip */
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s-3);
+}
+.kpi {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: var(--s-3) var(--s-4);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  min-height: 76px;
+  justify-content: center;
+}
+.kpi-label {
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.kpi-value {
+  color: var(--text);
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-sub {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+
+/* Tables */
+.table-scroll {
+  overflow-x: auto;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+}
+.table {
+  font-size: var(--fs-base);
+  font-variant-numeric: tabular-nums;
+}
+.table thead th {
+  background: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.table thead th.num { text-align: right; }
+.table thead th.sortable { cursor: pointer; user-select: none; }
+.table thead th.sortable:hover { color: var(--text); }
+.table thead th.sortable[aria-sort] { color: var(--text); }
+.table thead th .sort-indicator {
+  display: inline-block;
+  width: 0.8em;
+  margin-left: 4px;
+  color: var(--text-faint);
+  font-size: 0.85em;
+}
+.table thead th[aria-sort] .sort-indicator { color: var(--brand); }
+.table tbody td {
+  padding: var(--s-2) var(--s-3);
+  border-bottom: 1px solid var(--border);
+}
+.table tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.table tbody tr:hover { background: var(--surface-alt); }
+.table tbody tr:last-child td { border-bottom: 0; }
+.table tbody tr.clickable { cursor: pointer; }
+.table tbody tr.clickable:hover { background: var(--brand-soft); }
+.table tbody td.clickable { cursor: pointer; }
+.table tbody tr:hover td.clickable { background: var(--brand-soft); }
+.table thead th.star-col,
+.table tbody td.star-col {
+  width: 36px;
+  text-align: center;
+  padding-left: var(--s-2);
+  padding-right: var(--s-2);
+}
+.star-btn {
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  color: var(--text-faint);
+  border-radius: var(--r-sm);
+  transition: color 80ms ease, transform 80ms ease;
+}
+.star-btn:hover { color: var(--accent, #f5a623); transform: scale(1.1); }
+.star-btn.on { color: var(--accent, #f5a623); }
+.star-btn:focus-visible { outline: 2px solid var(--brand, #4f7cff); outline-offset: 1px; }
+.empty {
+  color: var(--text-faint);
+  font-size: var(--fs-sm);
+  text-align: center;
+  padding: var(--s-5) !important;
+}
+.empty-cell { text-align: center; color: var(--text-faint); padding: var(--s-5); }
+
+/* Market-wide ETF flow */
+.market-toolbar .kpi-strip { margin-top: var(--s-2); }
+.market-scheduler-row {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--s-3);
+  padding-top: var(--s-2);
+  border-top: 1px solid var(--border);
+}
+.market-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 0.9fr);
+  gap: var(--s-4);
+}
+.market-flow-table { table-layout: fixed; min-width: 900px; }
+.market-flow-table th:nth-child(1),
+.market-flow-table td:nth-child(1) { width: 48px; }
+.market-flow-table th:nth-child(3),
+.market-flow-table td:nth-child(3) { width: 88px; }
+.market-flow-table th:nth-child(4),
+.market-flow-table td:nth-child(4) { width: 120px; }
+.market-components {
+  color: var(--text-muted);
+  line-height: 1.5;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+.copy-block {
+  margin: 0;
+  min-height: 360px;
+  max-height: 680px;
+  overflow: auto;
+  padding: var(--s-4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--surface-alt);
+  color: var(--text);
+  font: var(--fs-sm)/1.65 var(--font-sans);
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 1100px) {
+  .market-grid { grid-template-columns: 1fr; }
+}
+
+/* Pills, change colors */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-1);
+  padding: 2px var(--s-2);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--r-full);
+  color: var(--text-muted);
+  font-size: var(--fs-xs);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.pill.positive { color: var(--positive); background: var(--positive-soft); border-color: transparent; }
+.pill.negative { color: var(--negative); background: var(--negative-soft); border-color: transparent; }
+.pill.warn { color: var(--warn); background: var(--warn-soft); border-color: transparent; }
+.pill.neutral { color: var(--neutral); background: var(--neutral-soft); border-color: transparent; }
+
+.delta-positive { color: var(--positive); font-weight: 600; }
+.delta-negative { color: var(--negative); font-weight: 600; }
+.delta-neutral { color: var(--text-muted); }
+
+/* Buttons */
+.btn-primary, .btn-ghost {
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+  transition: background var(--t-fast), border-color var(--t-fast), color var(--t-fast);
+}
+.btn-sm { padding: var(--s-1) var(--s-3); font-size: var(--fs-xs); }
+.btn-primary {
+  background: var(--brand);
+  color: white;
+}
+.btn-primary:hover { background: var(--brand-strong); }
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.btn-ghost:hover { background: var(--surface-alt); border-color: var(--border-strong); }
+.btn-ghost:disabled { color: var(--text-faint); cursor: not-allowed; }
+
+/* Toolbar */
+.toolbar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--s-3);
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--fs-xs);
+  color: var(--text-muted);
+}
+.field.grow { flex: 1; min-width: 200px; }
+.field input, .field select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  font-size: var(--fs-sm);
+  color: var(--text);
+  min-height: 32px;
+  transition: border-color var(--t-fast);
+}
+.field input:focus, .field select:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
+
+/* Detail view subpane: card-head + content (table/list). Explicit gap + slim
+ * export buttons make the header row visually balanced against the count pill
+ * and predictable across all four subpanes (Holdings/Changes/Timeline/Manifest). */
+.subpane { display: flex; flex-direction: column; gap: var(--s-3); }
+.subpane .card-head.compact .btn-ghost {
+  padding: var(--s-1) var(--s-3);
+  font-size: var(--fs-xs);
+}
+
+/* Subtabs (Detail view) */
+.subtabs .tabs {
+  display: flex;
+  gap: var(--s-1);
+  border-bottom: 1px solid var(--border);
+  margin: 0 calc(-1 * var(--s-5)) var(--s-3);
+  padding: 0 var(--s-5);
+}
+.tab {
+  padding: var(--s-2) var(--s-3);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+.tab:hover { color: var(--text); }
+.tab[aria-current="true"] {
+  color: var(--text);
+  border-bottom-color: var(--brand);
+}
+
+/* Detail split */
+.split-2 {
+  display: grid;
+  grid-template-columns: minmax(0, 2.6fr) minmax(260px, 1fr);
+  gap: var(--s-4);
+}
+@media (max-width: 1000px) {
+  .split-2 { grid-template-columns: 1fr; }
+}
+
+/* Feed (recent changes / mini lists) */
+.feed {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.feed.compact { gap: var(--s-1); margin-bottom: var(--s-3); }
+.feed-row {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-2) var(--s-3);
+  background: var(--surface-alt);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.feed-row .name { color: var(--text); font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-row.signal-row .name { font-weight: 600; }   /* 종목명 강조: 분석상 가장 중요한 정보 */
+.feed-row .code { color: var(--text-faint); font-size: var(--fs-xs); font-family: var(--font-mono); }
+.feed-row .date { color: var(--text-muted); font-size: var(--fs-xs); font-family: var(--font-mono); white-space: nowrap; }
+.feed-row .etf-tag {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.feed-row.with-date { grid-template-columns: 90px 80px 1fr auto auto; }
+/* Signal row: date | (provider) | constituent | type chip | ETF name | weight Δ */
+.feed-row.signal-row { grid-template-columns: 90px minmax(180px, 1fr) 80px minmax(200px, 1.2fr) 84px; align-items: center; }
+.feed-row.signal-row.with-provider { grid-template-columns: 90px auto minmax(180px, 1fr) 80px minmax(200px, 1.2fr) 84px; }
+/* 펀드명: 컨텍스트 정보라 muted 톤으로 강등 (종목명/델타에 시선 양보) */
+.feed-row .etf-name {
+  font-weight: 400;
+  color: var(--text-muted);
+  font-size: var(--fs-sm);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 날짜 그룹화: 같은 날짜 연속 행에서는 셀을 비워두고 같은 폭만 유지 (정렬 보존) */
+.feed-row .date.date-empty { visibility: hidden; }
+
+/* 액티브 시그널 방향과 비중 델타 부호가 불일치한 행: 작은 ⚡ 마크 + 좌측 액센트 */
+.feed-row.divergent { border-left: 2px solid var(--warn); padding-left: calc(var(--s-3) - 2px); }
+.diverge-mark {
+  font-size: 0.75em;
+  margin-left: 4px;
+  color: var(--warn);
+  vertical-align: super;
+  cursor: help;
+}
+.feed-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  margin-top: var(--s-3);
+}
+.feed-footer .btn-ghost { padding: var(--s-1) var(--s-3); }
+.field.compact { gap: var(--s-1); }
+.field.compact > span { font-size: var(--fs-xs); }
+
+/* Timeline */
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-4);
+}
+.timeline-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.timeline-group h4 {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  padding-bottom: var(--s-1);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Operations */
+.ops-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s-4);
+}
+@media (max-width: 900px) {
+  .ops-grid { grid-template-columns: 1fr; }
+  .card.span-2 { grid-column: auto; }
+}
+.kv {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: var(--s-2);
+  margin: 0;
+  font-size: var(--fs-sm);
+}
+.kv dt { color: var(--text-muted); font-size: var(--fs-xs); }
+.kv dd { margin: 0; color: var(--text); }
+.kv dd.mono { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text-muted); word-break: break-all; }
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  flex-wrap: wrap;
+}
+.row-actions .align-bottom { align-self: flex-end; }
+.row-actions .align-bottom.pill { margin-bottom: 5px; }
+
+/* Multi-select chip-style checkbox group for the 유형 filter — 4 toggles inline,
+ * each click flips one type's inclusion. Sits in the 32px control row so it
+ * aligns with sibling .field.compact selects above/below their labels. */
+.field.compact > .check-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s-3);
+  min-height: 32px;
+  padding: 0 var(--s-2);
+}
+.check-group .check-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-sm);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.check-group .check-item input[type="checkbox"] { margin: 0; cursor: pointer; }
+
+/* Inline toggle nested inside a .field.compact (matches select height & label rhythm).
+ * Drops the heavy pill chrome — the switch itself is the state indicator.
+ * align-items: center stacks the label centered over the toggle so misaligned
+ * label/control widths still read as visually centered. */
+.field.compact.toggle-field { gap: 4px; align-items: center; text-align: center; }
+.field.compact.toggle-field > .toggle-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 var(--s-2);
+}
+
+/* Result count rendered as a labeled cell so the number has context.
+ * The pill itself stays compact; the host provides the 32px row to align with
+ * the select inputs above/below the label. min-width on the pill reserves space
+ * for up to 5 digits so digit-count changes (e.g. 504 → 18) don't shift the
+ * surrounding controls within the right-pinned `.row-actions` block. */
+.field.compact.result-count { align-items: center; text-align: center; }
+.field.compact.result-count > .pill-host {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 var(--s-1);
+}
+.field.compact.result-count > .pill-host > .pill {
+  /* Fixed-ish width: handles "8" → "★ 999" → "1234" without expanding.
+   * `min-width` rather than `width` so very unusual longer values (e.g. 5+ digits)
+   * still fit gracefully via expansion rather than overflow. */
+  min-width: 56px;
+  justify-content: center;
+}
+.muted { color: var(--text-muted); font-size: var(--fs-sm); margin: 0; }
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--s-3);
+}
+.sched-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+}
+.checks {
+  display: grid;
+  /* 3-column fixed grid: each cell ~33% of card width — fits long Korean ETF names
+   * (e.g. "TIME 글로벌휴머노이드로봇산업액티브") on one line without truncation. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--s-1);
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--s-2);
+  background: var(--surface-alt);
+}
+@media (max-width: 900px) { .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .checks { grid-template-columns: 1fr; } }
+.checks.compact {
+  grid-template-columns: repeat(auto-fit, minmax(200px, max-content));
+  max-height: none;
+}
+.checks label {
+  display: flex;
+  align-items: center;
+  gap: var(--s-2);
+  padding: var(--s-1) var(--s-2);
+  font-size: var(--fs-sm);
+  border-radius: var(--r-sm);
+}
+.checks label:hover { background: var(--surface); }
+.checks code { color: var(--text-faint); margin-left: auto; font-size: var(--fs-xs); }
+.checks .empty { padding: var(--s-3) !important; }
+
+/* Toggle switch */
+.field-toggle {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: var(--s-2) var(--s-3);
+  min-height: 32px;
+  color: var(--text);
+}
+.field-toggle > span { font-size: var(--fs-sm); font-weight: 500; color: var(--text); }
+
+input[type="checkbox"].toggle-switch {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 36px;
+  height: 20px;
+  border-radius: var(--r-full);
+  background: var(--border-strong);
+  border: none;
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--t-base);
+}
+input[type="checkbox"].toggle-switch::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px rgba(0,0,0,.25);
+  transition: transform var(--t-base);
+}
+input[type="checkbox"].toggle-switch:checked { background: var(--brand); }
+input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16px); }
+
+/* Weight bar (in holdings table) */
+.weight-bar {
+  display: inline-block;
+  width: 60px;
+  height: 6px;
+  background: var(--surface-alt);
+  border-radius: var(--r-full);
+  vertical-align: middle;
+  margin-right: var(--s-2);
+  overflow: hidden;
+}
+.weight-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: var(--r-full);
+}
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: var(--s-5);
+  right: var(--s-5);
+  background: var(--text);
+  color: white;
+  padding: var(--s-2) var(--s-4);
+  border-radius: var(--r-md);
+  font-size: var(--fs-sm);
+  box-shadow: var(--shadow-hover);
+  z-index: 100;
+  max-width: 360px;
+}
+.toast.error { background: var(--positive); }

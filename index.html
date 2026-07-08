@@ -1,0 +1,470 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Active ETF Public</title>
+  <link rel="stylesheet" href="assets/tokens.css">
+  <link rel="stylesheet" href="assets/main.css">
+    <script>
+    window.ACTIVE_ETF_STATIC_DATA_BASE = "data";
+    window.ACTIVE_ETF_STATIC_BUILD_VERSION = "2026.07.09.1";
+  </script>
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <!-- Launch overlay: visible immediately at HTML parse time so the user sees a
+       loading state even before JS evaluates. Removed by app.js once the first
+       overview render completes. Cold-start of TIGER can take ~90s, so a static
+       indicator here avoids the "is it broken?" perception during that window. -->
+  <div id="launch-overlay" class="launch-overlay" data-launch-overlay>
+    <div class="launch-card">
+      <div class="launch-spinner" aria-hidden="true"></div>
+      <div class="launch-title">Active ETF</div>
+      <div class="launch-status" data-launch-status>준비 중…</div>
+      <div class="launch-hint" data-launch-hint>첫 실행은 데이터 인덱싱 때문에 시간이 좀 걸릴 수 있습니다.</div>
+      <button class="launch-retry" data-launch-retry hidden>재시도</button>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">●</span>
+      <strong>Active ETF</strong>
+      <span class="brand-meta" data-bind="bootstrap_meta">loading…</span>
+    </div>
+    <nav class="provider-tabs" data-bind="provider_tabs"></nav>
+	    <nav class="view-tabs">
+	      <button class="view-tab" data-view="overview">Overview</button>
+	      <button class="view-tab" data-view="market">ETF 수급</button>
+	      <button class="view-tab" data-view="detail">Detail</button>
+	      <button class="view-tab" data-view="ops">Operations</button>
+	    </nav>
+    <div class="topbar-status">
+      <span class="pill" data-bind="owner_badge">owner ?</span>
+    </div>
+  </header>
+
+  <main class="content">
+    <!-- ====== Overview ====== -->
+    <section class="view" data-view-pane="overview">
+      <div class="card">
+        <div class="card-head">
+          <h2>ETF Lineup</h2>
+          <div class="row-actions">
+            <label class="field compact toggle-field">
+              <span>관심 ETF</span>
+              <span class="toggle-host">
+                <input type="checkbox" class="toggle-switch" data-control="lineup_favorites_only">
+              </span>
+            </label>
+            <span class="field compact result-count">
+              <span>관심</span>
+              <span class="pill-host">
+                <span class="pill" data-bind="favorites_count" title="저장된 관심 ETF 수">★ 0</span>
+              </span>
+            </span>
+            <span class="field compact result-count">
+              <span>건수</span>
+              <span class="pill-host">
+                <span class="pill" data-bind="lineup_count">0</span>
+              </span>
+            </span>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="star-col" aria-label="관심"></th>
+                <th data-bind-th="lineup_provider" hidden>펀드</th>
+                <th class="sortable" data-sort-key="name">ETF<span class="sort-indicator"></span></th>
+                <th>코드</th>
+                <th>상장일</th>
+                <th>최신 기준일</th>
+                <th class="num">보유</th>
+                <th class="num sortable" data-sort-key="nav_total">설정액<span class="sort-indicator"></span></th>
+                <th class="num sortable" data-sort-key="market_cap">시가총액<span class="sort-indicator"></span></th>
+                <th class="num">변화</th>
+              </tr>
+            </thead>
+            <tbody data-bind="lineup_body"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <h2>최근 운용 시그널 (신규/편출 · 액티브 매수/매도)</h2>
+          <div class="row-actions">
+            <label class="field compact">
+              <span>기간</span>
+              <select data-control="recent_window">
+                <option value="1">1거래일</option>
+                <option value="3">3거래일</option>
+                <option value="5" selected>5거래일</option>
+                <option value="10">10거래일</option>
+                <option value="20">20거래일</option>
+                <option value="60">60거래일</option>
+              </select>
+            </label>
+            <span class="field compact">
+              <span>유형</span>
+              <span class="check-group" data-control="recent_signal_types">
+                <label class="check-item"><input type="checkbox" data-signal-type="신규 편입" checked><span>편입</span></label>
+                <label class="check-item"><input type="checkbox" data-signal-type="편출" checked><span>편출</span></label>
+                <label class="check-item"><input type="checkbox" data-signal-type="액티브 매수" checked><span>매수</span></label>
+                <label class="check-item"><input type="checkbox" data-signal-type="액티브 매도" checked><span>매도</span></label>
+              </span>
+            </span>
+            <label class="field compact toggle-field">
+              <span>관심 ETF</span>
+              <span class="toggle-host">
+                <input type="checkbox" class="toggle-switch" data-control="recent_favorites_only">
+              </span>
+            </label>
+            <span class="field compact result-count">
+              <span>건수</span>
+              <span class="pill-host">
+                <span class="pill" data-bind="recent_changes_count">0</span>
+              </span>
+            </span>
+          </div>
+        </div>
+        <div class="feed" data-bind="recent_changes_feed"></div>
+        <div class="feed-footer">
+          <button class="btn-ghost" data-action="recent_changes_more" hidden>더보기</button>
+          <span class="muted" data-bind="recent_changes_status"></span>
+        </div>
+      </div>
+
+      <!-- KPI strip moved to bottom: at-a-glance totals are reference info,
+           not the primary scan; lineup + signals deserve top fold. -->
+      <div class="kpi-strip" data-bind="overview_kpis"></div>
+	    </section>
+	
+	    <!-- ====== ETF market flow ====== -->
+	    <section class="view" data-view-pane="market" hidden>
+	      <div class="card market-toolbar">
+	        <div class="card-head">
+	          <h2 data-bind="market_flow_title">일간 ETF 개인 순매도 상위(전일)</h2>
+	          <div class="row-actions">
+	            <label class="field compact">
+	              <span>구분</span>
+	              <select data-control="market_flow_direction">
+	                <option value="sell">순매도</option>
+	                <option value="buy">순매수</option>
+	              </select>
+	            </label>
+	            <label class="field compact">
+	              <span>기준일</span>
+	              <input type="date" data-control="market_flow_date">
+	            </label>
+	            <label class="field compact">
+	              <span>건수</span>
+	              <select data-control="market_flow_limit">
+	                <option value="5">5</option>
+	                <option value="10">10</option>
+	                <option value="20">20</option>
+	                <option value="50">50</option>
+	              </select>
+	            </label>
+	            <button class="btn-ghost" data-action="market_flow_load">조회</button>
+	            <button class="btn-primary" data-action="market_flow_refresh">새로고침</button>
+	            <button class="btn-ghost" data-action="market_flow_copy">본문 복사</button>
+	            <button class="btn-ghost" data-action="market_flow_copy_both">양쪽 복사</button>
+	            <span class="pill" data-bind="market_flow_status">-</span>
+	          </div>
+	        </div>
+	        <div class="kpi-strip" data-bind="market_flow_kpis"></div>
+	        <div class="market-scheduler-row">
+	          <label class="field compact toggle-field">
+	            <span>자동 수집</span>
+	            <span class="toggle-host"><input type="checkbox" class="toggle-switch" data-control="market_sched_enabled"></span>
+	          </label>
+	          <label class="field compact">
+	            <span>시각</span>
+	            <input type="time" data-control="market_sched_time" value="18:30">
+	          </label>
+	          <label class="field compact toggle-field">
+	            <span>이 PC 허용</span>
+	            <span class="toggle-host"><input type="checkbox" class="toggle-switch" data-control="market_sched_current_allowed"></span>
+	          </label>
+	          <button class="btn-ghost" data-action="market_sched_save">자동 수집 저장</button>
+	          <span class="pill" data-bind="market_sched_status">-</span>
+	          <span class="muted" data-bind="market_flow_progress"></span>
+	        </div>
+	      </div>
+	
+	      <div class="market-grid">
+	        <div class="card">
+	          <div class="card-head compact">
+	            <h3>순위</h3>
+	            <span class="pill" data-bind="market_flow_count">0</span>
+	          </div>
+	          <div class="table-scroll">
+	            <table class="table market-flow-table">
+	              <thead>
+	                <tr>
+	                  <th class="num">#</th>
+	                  <th>ETF</th>
+	                  <th>코드</th>
+	                  <th class="num" data-bind="market_flow_value_header">개인 순매도</th>
+	                  <th>주요 구성</th>
+	                </tr>
+	              </thead>
+	              <tbody data-bind="market_flow_body"></tbody>
+	            </table>
+	          </div>
+	        </div>
+	
+	        <div class="card">
+	          <div class="card-head compact">
+	            <h3>복사용 본문</h3>
+	            <button class="btn-ghost btn-sm" data-action="market_flow_copy_secondary">복사</button>
+	          </div>
+	          <pre class="copy-block" data-bind="market_flow_text"></pre>
+	        </div>
+	      </div>
+	
+	      <div class="card">
+	        <div class="card-head compact">
+	          <h3>오류 진단</h3>
+	          <span class="pill" data-bind="market_flow_diagnostics_count">0</span>
+	        </div>
+	        <div class="feed compact" data-bind="market_flow_diagnostics"></div>
+	      </div>
+	    </section>
+	
+	    <!-- ====== Detail ====== -->
+	    <section class="view" data-view-pane="detail" hidden>
+      <div class="toolbar card">
+        <label class="field">
+          <span>ETF</span>
+          <select data-control="etf"></select>
+        </label>
+        <label class="field">
+          <span>모드</span>
+          <select data-control="mode">
+            <option value="single">단일일</option>
+            <option value="range">기간</option>
+          </select>
+        </label>
+        <label class="field" data-when-mode="single">
+          <span>기준일</span>
+          <select data-control="date_single"></select>
+        </label>
+        <label class="field" data-when-mode="range" hidden>
+          <span>시작</span>
+          <select data-control="date_from"></select>
+        </label>
+        <label class="field" data-when-mode="range" hidden>
+          <span>종료</span>
+          <select data-control="date_to"></select>
+        </label>
+        <label class="field grow">
+          <span>검색</span>
+          <input type="search" data-control="q" placeholder="종목명 또는 코드">
+        </label>
+        <label class="field">
+          <span>변화 유형</span>
+          <select data-control="change_type">
+            <option value="all">전체</option>
+            <option>신규 편입</option>
+            <option>편출</option>
+            <option>비중확대</option>
+            <option>비중축소</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="kpi-strip" data-bind="detail_kpis"></div>
+
+      <div class="card subtabs">
+        <nav class="tabs">
+          <button class="tab" data-subtab="holdings">Holdings</button>
+          <button class="tab" data-subtab="changes">Changes</button>
+          <button class="tab" data-subtab="timeline">Timeline</button>
+          <button class="tab" data-subtab="manifest">Manifest</button>
+        </nav>
+
+        <div class="subpane" data-subpane="holdings">
+          <div class="split-2">
+            <div class="card-inner">
+              <div class="card-head compact">
+                <h3>구성종목</h3>
+                <div class="row-actions">
+                  <span class="pill" data-bind="holdings_count">0</span>
+                  <button class="btn-ghost" data-export="holdings" data-format="copy">복사</button>
+                  <button class="btn-ghost" data-export="holdings" data-format="csv">CSV</button>
+                  <button class="btn-ghost" data-export="holdings" data-format="xlsx">XLSX</button>
+                </div>
+              </div>
+              <div class="table-scroll">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th class="num">#</th>
+                      <th>종목명</th>
+                      <th>코드</th>
+                      <th class="num">수량</th>
+                      <th class="num">평가금액</th>
+                      <th class="num">비중</th>
+                    </tr>
+                  </thead>
+                  <tbody data-bind="holdings_body"></tbody>
+                </table>
+              </div>
+            </div>
+            <div class="card-inner side">
+              <div class="card-head compact"><h3>신규 편입</h3></div>
+              <div class="feed compact" data-bind="top_additions"></div>
+              <div class="card-head compact"><h3>편출</h3></div>
+              <div class="feed compact" data-bind="top_removals"></div>
+              <div class="card-head compact"><h3>비중 변화 Top</h3></div>
+              <div class="feed compact" data-bind="top_weight_changes"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="subpane" data-subpane="changes" hidden>
+          <div class="card-head compact">
+            <h3>구성종목 변화</h3>
+            <div class="row-actions">
+              <span class="pill" data-bind="changes_count">0</span>
+              <button class="btn-ghost" data-export="changes" data-format="copy">복사</button>
+              <button class="btn-ghost" data-export="changes" data-format="csv">CSV</button>
+              <button class="btn-ghost" data-export="changes" data-format="xlsx">XLSX</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>기준일</th>
+                  <th>전일</th>
+                  <th>유형</th>
+                  <th>종목명</th>
+                  <th>코드</th>
+                  <th class="num">전 비중</th>
+                  <th class="num">비중</th>
+                  <th class="num">Δ</th>
+                </tr>
+              </thead>
+              <tbody data-bind="changes_body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="subpane" data-subpane="timeline" hidden>
+          <div class="card-head compact">
+            <h3>기간별 변화</h3>
+            <div class="row-actions">
+              <span class="pill" data-bind="timeline_count">0</span>
+              <button class="btn-ghost" data-export="timeline" data-format="copy">복사</button>
+              <button class="btn-ghost" data-export="timeline" data-format="csv">CSV</button>
+              <button class="btn-ghost" data-export="timeline" data-format="xlsx">XLSX</button>
+            </div>
+          </div>
+          <div class="timeline" data-bind="timeline_body"></div>
+        </div>
+
+        <div class="subpane" data-subpane="manifest" hidden>
+          <div class="card-head compact">
+            <h3>다운로드 상태</h3>
+            <div class="row-actions">
+              <button class="btn-ghost" data-export="manifest" data-format="copy">복사</button>
+              <button class="btn-ghost" data-export="manifest" data-format="csv">CSV</button>
+              <button class="btn-ghost" data-export="manifest" data-format="xlsx">XLSX</button>
+            </div>
+          </div>
+          <div class="table-scroll">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>기준일</th>
+                  <th>상태</th>
+                  <th>사유</th>
+                  <th class="num">보유</th>
+                </tr>
+              </thead>
+              <tbody data-bind="manifest_body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== Operations ====== -->
+    <section class="view" data-view-pane="ops" hidden>
+      <div class="ops-grid">
+        <div class="card">
+          <div class="card-head">
+            <h2>Owner</h2>
+            <button class="btn-primary btn-sm" data-action="claim_owner">이 PC를 Owner로 등록</button>
+          </div>
+          <dl class="kv">
+            <dt>Current PC</dt><dd data-bind="ops_current_pc">-</dd>
+            <dt>Machine ID</dt><dd class="mono" data-bind="ops_current_machine_id">-</dd>
+            <dt>Owner PC</dt><dd data-bind="ops_owner_pc">-</dd>
+            <dt>Owner ID</dt><dd class="mono" data-bind="ops_owner_machine_id">-</dd>
+          </dl>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>Snapshot</h2>
+            <span class="pill" data-bind="ops_snapshot_state">ready</span>
+          </div>
+          <p class="muted"><code data-bind="ops_snapshot_dir">snapshot</code> 와 로컬 DB를 동기화합니다. 내보내기는 Owner PC만 허용됩니다.</p>
+          <div class="row-actions">
+            <button class="btn-primary" data-action="export_snapshot">내보내기</button>
+            <button class="btn-ghost" data-action="import_snapshot">가져오기</button>
+          </div>
+        </div>
+
+        <div class="card span-2">
+          <div class="card-head">
+            <h2>Scheduler</h2>
+            <span class="pill" data-bind="ops_scheduler_status">inactive</span>
+          </div>
+          <div class="settings-grid">
+            <label class="field field-toggle">
+              <span>활성화</span>
+              <input type="checkbox" class="toggle-switch" data-control="sched_enabled">
+            </label>
+            <label class="field">
+              <span>업데이트 시각</span>
+              <input type="time" data-control="sched_time" value="18:30">
+            </label>
+            <label class="field field-toggle">
+              <span>이 PC 허용</span>
+              <input type="checkbox" class="toggle-switch" data-control="sched_current_allowed">
+            </label>
+          </div>
+          <div class="sched-stack">
+            <div>
+              <div class="card-head compact"><h3>허용 PC</h3></div>
+              <div class="checks compact" data-bind="sched_machine_list"></div>
+            </div>
+            <div>
+              <div class="card-head compact">
+                <h3>업데이트 대상 ETF</h3>
+                <span class="pill" data-bind="sched_ticker_count">0</span>
+              </div>
+              <div class="checks" data-bind="sched_ticker_list"></div>
+            </div>
+          </div>
+          <div class="row-actions">
+            <button class="btn-primary" data-action="save_scheduler">설정 저장</button>
+            <button class="btn-ghost" data-action="run_scheduler">지금 업데이트</button>
+            <span class="pill" data-bind="ops_save_state">ready</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div class="toast" data-bind="toast" hidden></div>
+</body>
+</html>
