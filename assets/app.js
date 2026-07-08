@@ -404,6 +404,36 @@ function effectiveChangeClass(row) {
   if (eff === "편출" || eff === "액티브 매도") return "negative";
   return "neutral";
 }
+
+const NON_COMMON_STOCK_CODES = new Set(["CASH", "KRW", "USD", "JPY", "CNY", "HKD", "EUR"]);
+const NON_COMMON_STOCK_KEYWORDS = [
+  "현금", "예금", "미수금", "미지급", "스왑", "SWAP", "TRS",
+  "채권", "국고", "국채", "통안", "회사채", "금융채", "산금채", "특수채",
+  "전자단기사채", "단기사채", "기업어음", "(단)", "TREASURY", "BOND", "NOTE", "T-BILL",
+  "선물", "옵션", "FUTURE", "FUTURES", "CALL", "PUT", "INDEX",
+  "ETF", "ETN", "펀드", "FUND",
+];
+const NON_COMMON_STOCK_PREFIXES = ["KODEX ", "TIGER ", "RISE ", "SOL ", "PLUS ", "ACE ", "TIMEFOLIO ", "KOACT "];
+const NON_COMMON_STOCK_PATTERNS = [
+  /\b[A-Z]{2,}\b.*\b\d+(?:\s+\d+\/\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
+  /20\d{6}-\d+-\d+\(단\)/,
+  /\b[CP]\s*20\d{4}\b/,
+  /\b[CP]\d{3,}\b/,
+  /\bFUT\d{4,}\b/,
+];
+
+function isCommonStockConstituent(row) {
+  const code = String(row?.constituent_code || "").trim().toUpperCase();
+  const name = String(row?.constituent_name || "").trim().toUpperCase();
+  if (!code && !name) return false;
+  const combined = `${name} ${code}`.trim();
+  if (NON_COMMON_STOCK_CODES.has(code)) return false;
+  if (NON_COMMON_STOCK_PREFIXES.some((prefix) => name.startsWith(prefix))) return false;
+  if (NON_COMMON_STOCK_KEYWORDS.some((keyword) => combined.includes(keyword))) return false;
+  if (NON_COMMON_STOCK_PATTERNS.some((pattern) => pattern.test(combined))) return false;
+  return true;
+}
+
 function deltaClass(value) {
   const n = Number(value || 0);
   if (n > 0) return "delta-positive";
@@ -767,10 +797,8 @@ function renderOverview() {
   const meta = bind("bootstrap_meta");
   meta.textContent = `${summary.etf_count || 0} ETFs · ${summary.latest_snapshot_date || "-"}`;
 
-  // KPI strip — exclude CASH for consistency with the recent-signal feed
-  // (CASH는 운용 의사결정이 아니라 잔여 비중 조정 노이즈).
   const feedRowsRaw = o.recent_changes_feed || o.recent_changes_top || [];
-  const feedRows = feedRowsRaw.filter((r) => (r.constituent_code || "").toUpperCase() !== "CASH");
+  const feedRows = feedRowsRaw.filter(isCommonStockConstituent);
   const recentAdditions = feedRows.filter((r) => r.change_type === "신규 편입").length;
   const recentRemovals = feedRows.filter((r) => r.change_type === "편출").length;
   const recentActiveBuy = feedRows.filter((r) => r.active_change_type === "active_buy").length;
@@ -962,12 +990,10 @@ function renderRecentChanges() {
   const items = o.recent_changes_feed || o.recent_changes_top || [];
   const favOnly = aggregate ? true : state.recent.favoritesOnly;
   const favSet = state.favorites;
-  // CASH는 운용 시그널이 아니라 잔여 비중 조정 결과로 늘 함께 움직이는 노이즈
-  // 행이라 피드에서 항상 제외 (constituent_code = "CASH").
-  const cashFiltered = items.filter((r) => (r.constituent_code || "").toUpperCase() !== "CASH");
+  const commonStockFiltered = items.filter(isCommonStockConstituent);
   const favFiltered = aggregate
-    ? cashFiltered                                // aggregate payload is already favorites-only
-    : (favOnly ? cashFiltered.filter((r) => favSet.has(r.ticker)) : cashFiltered);
+    ? commonStockFiltered                                // aggregate payload is already favorites-only
+    : (favOnly ? commonStockFiltered.filter((r) => favSet.has(r.ticker)) : commonStockFiltered);
   // Multi-select 체크박스 — 선택된 effectiveChangeType만 통과. 4개 모두 켜져 있으면
   // 사실상 "전체"와 동일하지만 비교 비용은 무시 가능.
   const allowedTypes = state.recent.signalTypes;
