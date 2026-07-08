@@ -39,6 +39,7 @@ function fmtKrUnit(value) {
 
 const RECENT_PAGE_SIZE = 20;
 const RECENT_WINDOW_DEFAULT = 5;
+const LINEUP_PAGE_SIZE = 10;
 const OVERVIEW_CACHE_TTL_MS = 60_000;   // tab-click cache: re-clicks within 60s reuse data
 
 // Favorites are per-PC: localStorage keeps reader PCs from racing the Owner
@@ -122,8 +123,9 @@ const state = {
   dateCache: new Map(),       // key = `${pid}|${ticker}` → string[]  — Detail view 진입 시 lazy fetch
   lineup: {
     favoritesOnly: false,
-    sortKey: null,             // "name" | "nav_total" | "market_cap" | null
-    sortDir: "asc",            // "asc" | "desc"
+    sortKey: "nav_total",      // "name" | "nav_total" | "market_cap"
+    sortDir: "desc",           // "asc" | "desc"
+    visible: LINEUP_PAGE_SIZE,
   },
   favorites: new Set(),
 	  detail: {
@@ -414,7 +416,7 @@ const NON_COMMON_STOCK_KEYWORDS = [
   "INDX", "CALL", "PUT", "INDEX", "외국환포워드", "FXFWD",
   "ETF", "ETN", "펀드", "FUND",
 ];
-const NON_COMMON_STOCK_PREFIXES = ["KODEX ", "TIGER ", "RISE ", "SOL ", "PLUS ", "ACE ", "TIMEFOLIO ", "KOACT "];
+const NON_COMMON_STOCK_PREFIXES = ["KODEX ", "TIGER ", "RISE ", "SOL ", "PLUS ", "ACE ", "TIME ", "TIMEFOLIO ", "KOACT "];
 const NON_COMMON_STOCK_PATTERNS = [
   /\b[A-Z]{2,}\b.*\b\d+(?:\s+\d+\/\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
   /\bT\s+\d+(?:\.\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
@@ -543,6 +545,10 @@ function renderViewTabs() {
   });
 }
 
+function resetLineupVisible() {
+  state.lineup.visible = LINEUP_PAGE_SIZE;
+}
+
 async function switchView(view) {
   if (isStaticMode() && view === "ops") {
     state.view = "overview";
@@ -573,6 +579,7 @@ async function switchView(view) {
 async function switchProvider(pid) {
   state.providerId = pid;
   state.loadingProvider = pid;   // 클릭한 탭에 spinner + topbar 상태 표시
+  resetLineupVisible();
   if (pid === AGGREGATE_PROVIDER_ID) {
     state.favorites = new Set();   // not meaningful in aggregate mode
     renderProviderTabs();
@@ -609,6 +616,7 @@ async function loadAggregate({ force = false } = {}) {
     const cached = state.aggregateCache;
     if (cached && cached.window === window && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) {
       state.recent.visible = RECENT_PAGE_SIZE;
+      resetLineupVisible();
       state.aggregate = cached.data;
       state.overview = cached.data;
       renderOverview();
@@ -617,6 +625,7 @@ async function loadAggregate({ force = false } = {}) {
   }
   try {
     state.recent.visible = RECENT_PAGE_SIZE;
+    resetLineupVisible();
     const pids = realProviderIds();
     if (pids.length === 0) {
       state.aggregate = { etfSummaryRows: [], recent_changes_feed: [], summary: {} };
@@ -728,6 +737,14 @@ function wireGlobalControls() {
   if (lineupFavToggle) {
     lineupFavToggle.addEventListener("change", () => {
       state.lineup.favoritesOnly = lineupFavToggle.checked;
+      resetLineupVisible();
+      renderLineup();
+    });
+  }
+  const lineupMoreBtn = document.querySelector("[data-action='lineup_more']");
+  if (lineupMoreBtn) {
+    lineupMoreBtn.addEventListener("click", () => {
+      state.lineup.visible += LINEUP_PAGE_SIZE;
       renderLineup();
     });
   }
@@ -779,6 +796,7 @@ async function loadOverview({ force = false } = {}) {
     const cached = state.overviewCache.get(cacheKey);
     if (cached && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) {
       state.recent.visible = RECENT_PAGE_SIZE;
+      resetLineupVisible();
       state.overview = cached.data;
       renderOverview();
       initDetailControls();
@@ -787,6 +805,7 @@ async function loadOverview({ force = false } = {}) {
   }
   try {
     state.recent.visible = RECENT_PAGE_SIZE;
+    resetLineupVisible();
     const data = await v2.overview(pid, { window });
     state.overviewCache.set(cacheKey, { data, fetchedAt: Date.now() });
     if (state.providerId !== pid) return;   // user already switched away
@@ -883,8 +902,9 @@ function wireLineupSort() {
         state.lineup.sortDir = state.lineup.sortDir === "asc" ? "desc" : "asc";
       } else {
         state.lineup.sortKey = key;
-        state.lineup.sortDir = "asc";
+        state.lineup.sortDir = key === "name" ? "asc" : "desc";
       }
+      resetLineupVisible();
       renderLineup();
     });
   });
@@ -900,8 +920,12 @@ function renderLineup() {
     ? allRows
     : (state.lineup.favoritesOnly ? allRows.filter((r) => favSet.has(r.ticker)) : allRows);
   const rows = sortLineupRows(filtered);
+  const visibleCount = Math.max(LINEUP_PAGE_SIZE, Math.min(state.lineup.visible, rows.length));
+  const visibleRows = rows.slice(0, visibleCount);
 
-  bind("lineup_count").textContent = nf.format(rows.length);
+  bind("lineup_count").textContent = rows.length > visibleRows.length
+    ? `${nf.format(visibleRows.length)} / ${nf.format(rows.length)}`
+    : nf.format(rows.length);
   const favCountEl = bind("favorites_count");
   if (favCountEl) {
     const total = aggregate
@@ -925,12 +949,19 @@ function renderLineup() {
     : (state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : "No ETFs");
   body.innerHTML = rows.length === 0
     ? `<tr><td colspan="${colspan}" class="empty">${emptyMsg}</td></tr>`
-    : rows.map((r) => {
+    : visibleRows.map((r) => {
         const isFav = isRowFavorite(r);
         const providerCell = aggregate
           ? `<td class="clickable"><span class="provider-badge">${escape(r.provider_label || r.provider_id || "")}</span></td>`
           : "";
-        const navTotalTitle = r.meta_snapshot_date ? `${r.meta_snapshot_date} 기준 NAV × 좌수` : "KRX 메타 미수집";
+        let navTotalTitle = "KRX 메타 미수집";
+        if (r.aum_source === "holdings_valuation") {
+          navTotalTitle = `${r.meta_snapshot_date || r.latest_snapshot_date || "-"} 기준 보유 평가금액 합계`;
+        } else if (r.aum_source === "funetf_aum") {
+          navTotalTitle = `${r.meta_snapshot_date || "-"} 기준 FUNETF 설정액`;
+        } else if (r.meta_snapshot_date) {
+          navTotalTitle = `${r.meta_snapshot_date} 기준 NAV × 좌수`;
+        }
         const mktCapTitle = r.meta_snapshot_date ? `${r.meta_snapshot_date} 기준 종가 × 좌수` : "KRX 메타 미수집";
         return `
         <tr data-row-ticker="${escape(r.ticker)}" data-row-pid="${escape(r.provider_id || state.providerId || "")}">
@@ -948,6 +979,13 @@ function renderLineup() {
           <td class="num clickable">${nf.format(r.change_row_count || 0)}</td>
         </tr>`;
       }).join("");
+
+  const moreBtn = document.querySelector("[data-action='lineup_more']");
+  if (moreBtn) {
+    const remaining = Math.max(0, rows.length - visibleRows.length);
+    moreBtn.hidden = remaining === 0;
+    moreBtn.textContent = remaining > 0 ? `더보기 ${nf.format(remaining)}` : "더보기";
+  }
 
   $$("[data-fav-ticker]", body).forEach((btn) => {
     btn.onclick = (event) => {
