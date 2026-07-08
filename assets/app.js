@@ -411,7 +411,7 @@ const NON_COMMON_STOCK_CODES = new Set(["CASH", "KRW", "USD", "JPY", "CNY", "HKD
 const NON_COMMON_STOCK_NAME_SUBSTRINGS = [
   "현금", "예금", "미수금", "미지급", "스왑",
   "채권", "국고", "국채", "통안", "회사채", "금융채", "산금채", "특수채",
-  "전자단기사채", "단기사채", "기업어음", "(단)", "(CP)", "선물", "옵션", "위클리", "만기",
+  "전자단기사채", "단기사채", "기업어음", "(단)", "(CP)", "(CD)", "선물", "옵션", "위클리", "만기",
   "외국환포워드", "펀드",
 ];
 const NON_COMMON_STOCK_NAME_KEYWORDS = [
@@ -419,7 +419,9 @@ const NON_COMMON_STOCK_NAME_KEYWORDS = [
   "BILL", "KTB", "KORGAS", "FUT", "FUTR", "FUTURE", "FUTURES", "IDX", "INDX",
   "CALL", "PUT", "INDEX", "FXFWD", "COMEX", "NYMX", "CBOT", "CBT",
   "RTS", "RIGHT", "RIGHTS", "WARRANT", "WARRANTS", "WTS",
-  "ETF", "ETN", "FUND",
+  "ETF", "ETN", "FUND", "ISHARES", "PROSHARES", "PROSHRE", "SPDR",
+  "DIREXION", "GLOBAL X", "ARK", "VANGUARD", "WISDOMTREE", "VANECK",
+  "ULTRASHORT",
 ];
 const NON_COMMON_STOCK_NAME_KEYWORD_PATTERNS = NON_COMMON_STOCK_NAME_KEYWORDS.map((keyword) => {
   const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -439,13 +441,19 @@ const NON_COMMON_STOCK_PATTERNS = [
   /\b[CP]\s*20\d{4}\b/,
   /\b[CP]\d{3,}\b/,
   /\bFUT\d{4,}\b/,
-  /\bKR6[A-Z0-9]{10}\b/,
-  /\bKRZF[A-Z0-9]{8}\b/,
+  /\bKR4[A-Z0-9]{9}\b/,
+  /\bKR6[A-Z0-9]{9,}\b/,
+  /\bKRZ[A-Z0-9]{9,}\b/,
+  /\b(?:EFV|IGF|XLY|XLF|SCO|SLV)\s+US(?:\s+EQUITY)?\b/,
   /(?:[A-Z가-힣]+)\s*\d{1,4}-\d{1,4}(?:-\d{1,4})?\b/,
 ];
 const NON_COMMON_STOCK_NAME_PATTERNS = [
   /(?:\d*우B?|우선주)(?:\(전환\))?$/,
   /PREF(?:ERRED)?(?:SHARES?)?$/,
+  /STATE STREET.*\bSECT\b/,
+  /(?:INVESCO\s+)?QQQ\s+TRUST/,
+  /BLOOMBERG CRUDE OIL/,
+  /SILVER TRUST/,
 ];
 
 function isCommonStockConstituent(row) {
