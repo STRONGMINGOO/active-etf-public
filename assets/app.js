@@ -408,14 +408,23 @@ function effectiveChangeClass(row) {
 }
 
 const NON_COMMON_STOCK_CODES = new Set(["CASH", "KRW", "USD", "JPY", "CNY", "HKD", "EUR"]);
-const NON_COMMON_STOCK_KEYWORDS = [
-  "현금", "예금", "미수금", "미지급", "스왑", "SWAP", "TRS",
+const NON_COMMON_STOCK_NAME_SUBSTRINGS = [
+  "현금", "예금", "미수금", "미지급", "스왑",
   "채권", "국고", "국채", "통안", "회사채", "금융채", "산금채", "특수채",
-  "전자단기사채", "단기사채", "기업어음", "(단)", "FLOAT", "FRN", "TREASURY", "BOND", "NOTE", "T-BILL",
-  "BILL", "KTB", "KORGAS", "선물", "옵션", "위클리", "만기", "FUTR", "FUTURE", "FUTURES",
-  "INDX", "CALL", "PUT", "INDEX", "외국환포워드", "FXFWD",
-  "ETF", "ETN", "펀드", "FUND",
+  "전자단기사채", "단기사채", "기업어음", "(단)", "(CP)", "선물", "옵션", "위클리", "만기",
+  "외국환포워드", "펀드",
 ];
+const NON_COMMON_STOCK_NAME_KEYWORDS = [
+  "SWAP", "TRS", "FLOAT", "FRN", "TREASURY", "BOND", "NOTE", "T-BILL",
+  "BILL", "KTB", "KORGAS", "FUT", "FUTR", "FUTURE", "FUTURES", "IDX", "INDX",
+  "CALL", "PUT", "INDEX", "FXFWD", "COMEX", "NYMX", "CBOT", "CBT",
+  "RTS", "RIGHT", "RIGHTS", "WARRANT", "WARRANTS", "WTS",
+  "ETF", "ETN", "FUND",
+];
+const NON_COMMON_STOCK_NAME_KEYWORD_PATTERNS = NON_COMMON_STOCK_NAME_KEYWORDS.map((keyword) => {
+  const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^A-Z0-9])${escaped}([^A-Z0-9]|$)`);
+});
 const NON_COMMON_STOCK_PREFIXES = ["KODEX ", "TIGER ", "RISE ", "SOL ", "PLUS ", "ACE ", "TIME ", "TIMEFOLIO ", "KOACT "];
 const NON_COMMON_STOCK_PATTERNS = [
   /\b[A-Z]{2,}\b.*\b\d+(?:\s+\d+\/\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
@@ -425,10 +434,18 @@ const NON_COMMON_STOCK_PATTERNS = [
   /\bB\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
   /\b[A-Z]{1,8}\s+US\s+\d{1,2}\/\d{1,2}\/\d{2,4}\s+[CP]\d/,
   /\b\d{1,2}\/\d{1,2}\/\d{2,4}\s+[CP]\d/,
+  /\bB\s+\d+(?:\.\d+)?\s+\d{1,2}\/\d{1,2}\/\d{2,4}\b/,
   /20\d{6}-\d+-\d+\(단\)/,
   /\b[CP]\s*20\d{4}\b/,
   /\b[CP]\d{3,}\b/,
   /\bFUT\d{4,}\b/,
+  /\bKR6[A-Z0-9]{10}\b/,
+  /\bKRZF[A-Z0-9]{8}\b/,
+  /(?:[A-Z가-힣]+)\s*\d{1,4}-\d{1,4}(?:-\d{1,4})?\b/,
+];
+const NON_COMMON_STOCK_NAME_PATTERNS = [
+  /(?:\d*우B?|우선주)(?:\(전환\))?$/,
+  /PREF(?:ERRED)?(?:SHARES?)?$/,
 ];
 
 function isCommonStockConstituent(row) {
@@ -438,7 +455,9 @@ function isCommonStockConstituent(row) {
   const combined = `${name} ${code}`.trim();
   if (NON_COMMON_STOCK_CODES.has(code)) return false;
   if (NON_COMMON_STOCK_PREFIXES.some((prefix) => name.startsWith(prefix))) return false;
-  if (NON_COMMON_STOCK_KEYWORDS.some((keyword) => combined.includes(keyword))) return false;
+  if (NON_COMMON_STOCK_NAME_SUBSTRINGS.some((keyword) => combined.includes(keyword))) return false;
+  if (NON_COMMON_STOCK_NAME_KEYWORD_PATTERNS.some((pattern) => pattern.test(name))) return false;
+  if (NON_COMMON_STOCK_NAME_PATTERNS.some((pattern) => pattern.test(name.replace(/\s+/g, "")))) return false;
   if (NON_COMMON_STOCK_PATTERNS.some((pattern) => pattern.test(combined))) return false;
   return true;
 }
