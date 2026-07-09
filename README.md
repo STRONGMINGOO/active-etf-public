@@ -2,7 +2,7 @@
 
 Read-only GitHub Pages build of the Active ETF dashboard.
 
-- Generated at: 2026-07-09T13:11:58
+- Generated at: 2026-07-09T19:14:41
 - Detail snapshots per ETF: latest 3
 - Overview windows: 1, 3, 5, 10, 20, 60 trading days
 - Source data is static JSON under `data/`.
