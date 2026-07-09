@@ -834,12 +834,17 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   }
 
   .topbar {
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-    gap: var(--s-2);
-    padding: var(--s-2) var(--s-3);
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand status"
+      "providers providers"
+      "views views";
+    align-items: center;
+    gap: var(--s-1) var(--s-2);
+    padding: 6px var(--s-3) 8px;
   }
   .brand {
+    grid-area: brand;
     min-width: 0;
     justify-content: flex-start;
   }
@@ -854,11 +859,24 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
-    padding-bottom: 2px;
+    padding-bottom: 0;
   }
+  .provider-tabs { grid-area: providers; }
+  .view-tabs { grid-area: views; }
   .provider-tabs::-webkit-scrollbar,
   .view-tabs::-webkit-scrollbar { display: none; }
-  .topbar-status { justify-content: flex-start; }
+  .topbar-status {
+    grid-area: status;
+    justify-content: flex-end;
+    align-items: center;
+    min-width: 0;
+  }
+  .topbar-status .pill {
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 
   .content {
     max-width: none;
@@ -1078,7 +1096,17 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   }
   .provider-tabs button,
   .view-tab {
-    padding: var(--s-2);
+    padding: 6px 9px;
+    font-size: var(--fs-xs);
+  }
+  .brand-meta { display: none; }
+  .topbar-status { display: none; }
+  .topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "brand"
+      "providers"
+      "views";
   }
   .row-actions .field,
   .market-scheduler-row .field,
@@ -1092,7 +1120,9 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   .kpi-strip { grid-template-columns: 1fr; }
   [data-view-pane="overview"] > .card:first-child .row-actions {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: auto minmax(62px, 1fr) minmax(92px, auto);
+    align-items: center;
+    column-gap: var(--s-1);
   }
   [data-view-pane="overview"] > .card:first-child .row-actions .field,
   [data-view-pane="overview"] > .card:first-child .row-actions button {
@@ -1100,8 +1130,18 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     min-width: 0;
     flex-basis: auto;
   }
-  [data-view-pane="overview"] > .card:first-child .row-actions .toggle-field {
-    grid-column: 1 / -1;
+  [data-view-pane="overview"] > .card:first-child .row-actions .toggle-field,
+  [data-view-pane="overview"] > .card:first-child .row-actions .result-count {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--s-2);
+    text-align: left;
+    white-space: nowrap;
+  }
+  [data-view-pane="overview"] > .card:first-child .row-actions .toggle-host,
+  [data-view-pane="overview"] > .card:first-child .row-actions .pill-host {
+    min-height: 24px;
+    padding: 0;
   }
   .lineup-table {
     min-width: 0;
