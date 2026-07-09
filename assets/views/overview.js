@@ -11,7 +11,7 @@ export function lineupRowsHtml({
   return rows.map((row) => {
     const isFav = isRowFavorite(row);
     const providerCell = aggregate
-      ? `<td class="clickable"><span class="provider-badge">${escape(row.provider_label || row.provider_id || "")}</span></td>`
+      ? `<td class="col-provider clickable"><span class="provider-badge">${escape(row.provider_label || row.provider_id || "")}</span></td>`
       : "";
     let navTotalTitle = "KRX 메타 미수집";
     if (row.aum_source === "holdings_valuation") {
@@ -28,14 +28,14 @@ export function lineupRowsHtml({
             <button class="star-btn ${isFav ? "on" : ""}" data-fav-ticker="${escape(row.ticker)}" data-fav-pid="${escape(favoritePidForRow(row) || "")}" aria-pressed="${isFav}" title="${isFav ? "관심 해제" : "관심 ETF로 저장"}">${isFav ? "★" : "☆"}</button>
           </td>
           ${providerCell}
-          <td class="clickable">${escape(row.name)}</td>
-          <td class="clickable"><code>${escape(row.ticker)}</code></td>
-          <td class="clickable">${escape(row.listing_date || "-")}</td>
-          <td class="clickable">${escape(row.latest_snapshot_date || "-")}</td>
-          <td class="num clickable">${nf.format(row.latest_holding_count || 0)}</td>
-          <td class="num clickable" title="${escape(navTotalTitle)}">${fmtKrUnit(row.nav_total)}</td>
-          <td class="num clickable" title="${escape(mktCapTitle)}">${fmtKrUnit(row.market_cap)}</td>
-          <td class="num clickable">${nf.format(row.change_row_count || 0)}</td>
+          <td class="col-name clickable">${escape(row.name)}</td>
+          <td class="col-code clickable"><code>${escape(row.ticker)}</code></td>
+          <td class="col-listing clickable">${escape(row.listing_date || "-")}</td>
+          <td class="col-date clickable">${escape(row.latest_snapshot_date || "-")}</td>
+          <td class="col-holdings num clickable">${nf.format(row.latest_holding_count || 0)}</td>
+          <td class="col-nav num clickable" title="${escape(navTotalTitle)}">${fmtKrUnit(row.nav_total)}</td>
+          <td class="col-market num clickable" title="${escape(mktCapTitle)}">${fmtKrUnit(row.market_cap)}</td>
+          <td class="col-changes num clickable">${nf.format(row.change_row_count || 0)}</td>
         </tr>`;
   }).join("");
 }

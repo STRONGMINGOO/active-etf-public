@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/main.css">
     <script>
     window.ACTIVE_ETF_STATIC_DATA_BASE = "data";
-    window.ACTIVE_ETF_STATIC_BUILD_VERSION = "2026.07.09.18";
+    window.ACTIVE_ETF_STATIC_BUILD_VERSION = "2026.07.09.19";
   </script>
   <script type="module" src="assets/app.js"></script>
 </head>
@@ -73,19 +73,19 @@
           </div>
         </div>
         <div class="table-scroll">
-          <table class="table">
+          <table class="table lineup-table">
             <thead>
               <tr>
                 <th class="star-col" aria-label="관심"></th>
-                <th data-bind-th="lineup_provider" hidden>펀드</th>
-                <th class="sortable" data-sort-key="name">ETF<span class="sort-indicator"></span></th>
-                <th>코드</th>
-                <th>상장일</th>
-                <th>최신 기준일</th>
-                <th class="num">보유</th>
-                <th class="num sortable" data-sort-key="nav_total">설정액<span class="sort-indicator"></span></th>
-                <th class="num sortable" data-sort-key="market_cap">시가총액<span class="sort-indicator"></span></th>
-                <th class="num">변화</th>
+                <th class="col-provider" data-bind-th="lineup_provider" hidden>펀드</th>
+                <th class="col-name sortable" data-sort-key="name">ETF<span class="sort-indicator"></span></th>
+                <th class="col-code">코드</th>
+                <th class="col-listing">상장일</th>
+                <th class="col-date">최신 기준일</th>
+                <th class="col-holdings num">보유</th>
+                <th class="col-nav num sortable" data-sort-key="nav_total">설정액<span class="sort-indicator"></span></th>
+                <th class="col-market num sortable" data-sort-key="market_cap">시가총액<span class="sort-indicator"></span></th>
+                <th class="col-changes num">변화</th>
               </tr>
             </thead>
             <tbody data-bind="lineup_body"></tbody>

@@ -992,6 +992,62 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   }
   .feed-row.divergent { padding-left: calc(var(--s-3) - 2px); }
 
+  .feed-row.with-date:not(.signal-row) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+    gap: var(--s-1) var(--s-2);
+  }
+  .feed-row.with-date:not(.signal-row) .date,
+  .feed-row.with-date:not(.signal-row) .etf-tag,
+  .feed-row.with-date:not(.signal-row) .name,
+  .feed-row.with-date:not(.signal-row) .etf-name {
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+  .feed-row.with-date:not(.signal-row) .etf-tag,
+  .feed-row.with-date:not(.signal-row) .pill {
+    justify-self: start;
+    width: fit-content;
+  }
+  .feed-row.with-date:not(.signal-row) .name,
+  .feed-row.with-date:not(.signal-row) .etf-name {
+    grid-column: 1 / -1;
+    line-height: 1.4;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+
+  .feed.compact .feed-row:not(.signal-row):not(.with-date),
+  .timeline .feed-row:not(.signal-row):not(.with-date) {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .feed.compact .feed-row:not(.signal-row):not(.with-date) .pill,
+  .timeline .feed-row:not(.signal-row):not(.with-date) .pill {
+    grid-column: 1;
+    justify-self: start;
+    width: fit-content;
+  }
+  .feed.compact .feed-row:not(.signal-row):not(.with-date) .name,
+  .timeline .feed-row:not(.signal-row):not(.with-date) .name {
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+  }
+  .feed.compact .feed-row:not(.signal-row):not(.with-date) strong,
+  .timeline .feed-row:not(.signal-row):not(.with-date) strong {
+    grid-column: 2;
+    grid-row: 1;
+    justify-self: end;
+    white-space: nowrap;
+  }
+
   .market-grid { grid-template-columns: 1fr; }
   .market-flow-table { min-width: 760px; }
   .copy-block {
@@ -1034,10 +1090,55 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     flex-basis: 100%;
   }
   .kpi-strip { grid-template-columns: 1fr; }
+  [data-view-pane="overview"] > .card:first-child .row-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  [data-view-pane="overview"] > .card:first-child .row-actions .field,
+  [data-view-pane="overview"] > .card:first-child .row-actions button {
+    width: auto;
+    min-width: 0;
+    flex-basis: auto;
+  }
+  [data-view-pane="overview"] > .card:first-child .row-actions .toggle-field {
+    grid-column: 1 / -1;
+  }
+  .lineup-table {
+    min-width: 0;
+    table-layout: fixed;
+    width: 100%;
+  }
+  .lineup-table .col-listing,
+  .lineup-table .col-date,
+  .lineup-table .col-holdings,
+  .lineup-table .col-market,
+  .lineup-table .col-changes {
+    display: none;
+  }
+  .lineup-table .star-col { width: 34px; }
+  .lineup-table .col-provider { width: 52px; }
+  .lineup-table .col-code { width: 58px; }
+  .lineup-table .col-nav { width: 72px; }
+  .lineup-table .col-name {
+    width: auto;
+    min-width: 0;
+  }
+  .lineup-table td.col-name {
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    line-height: 1.3;
+  }
+  .lineup-table td.col-code code { font-size: 11px; }
+  .lineup-table th.col-nav,
+  .lineup-table td.col-nav {
+    font-size: var(--fs-xs);
+  }
   .table {
     min-width: 720px;
     font-size: var(--fs-sm);
   }
+  .lineup-table { min-width: 0; }
   .table thead th,
   .table tbody td {
     padding: var(--s-2);
@@ -1054,4 +1155,13 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     grid-row: auto;
     justify-self: start;
   }
+}
+
+
+@media (max-width: 360px) {
+  .lineup-table .col-provider,
+  .lineup-table .col-code {
+    display: none;
+  }
+  .lineup-table .col-nav { width: 76px; }
 }
