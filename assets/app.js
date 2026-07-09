@@ -1,6 +1,18 @@
 // Active ETF — dashboard v2 frontend
 // Pure vanilla ES module; talks to /api/v2/* only.
 
+import { createStaticDataClient } from "./static_data.js";
+import {
+  AGGREGATE_PROVIDER_ID,
+  LINEUP_PAGE_SIZE,
+  OVERVIEW_CACHE_TTL_MS,
+  RECENT_PAGE_SIZE,
+  RECENT_WINDOW_DEFAULT,
+  state,
+} from "./state.js";
+import { changesRowsHtml, holdingsRowsHtml, manifestRowsHtml } from "./views/detail.js";
+import { lineupRowsHtml } from "./views/overview.js";
+
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 const bind = (key, root = document) => root.querySelector(`[data-bind="${key}"]`);
@@ -34,13 +46,6 @@ function fmtKrUnit(value) {
   if (abs >= 1e4) return `${sign}${nf.format(Math.round(abs / 1e4))}만`;
   return `${sign}${nf.format(Math.round(abs))}`;
 }
-
-// ---- state ----------------------------------------------------------------
-
-const RECENT_PAGE_SIZE = 20;
-const RECENT_WINDOW_DEFAULT = 5;
-const LINEUP_PAGE_SIZE = 10;
-const OVERVIEW_CACHE_TTL_MS = 60_000;   // tab-click cache: re-clicks within 60s reuse data
 
 // Favorites are per-PC: localStorage keeps reader PCs from racing the Owner
 // snapshot writes, and each user gets their own picks.
@@ -76,11 +81,6 @@ function toggleFavorite(pid, ticker) {
   return set;
 }
 
-// Sentinel provider id for the cross-provider aggregate view. Real provider ids
-// come from the bootstrap payload (timefolio/tiger/koact), so this prefix can't
-// collide with a real id.
-const AGGREGATE_PROVIDER_ID = "__favorites__";
-
 function isAggregateMode() {
   return state.providerId === AGGREGATE_PROVIDER_ID;
 }
@@ -99,66 +99,6 @@ function readAllFavorites() {
   for (const pid of realProviderIds()) out.set(pid, readFavorites(pid));
   return out;
 }
-
-const state = {
-  bootstrap: null,
-  providerId: null,
-  view: "overview",
-  subtab: "holdings",
-  overview: null,
-  // Aggregate-mode payload: { etfSummaryRows: [...], recent_changes_feed: [...] }
-  // — each row tagged with provider_id / provider_label. Built client-side from
-  // all per-provider overviews.
-  aggregate: null,
-  recent: {
-    window: RECENT_WINDOW_DEFAULT,
-    visible: RECENT_PAGE_SIZE,
-    favoritesOnly: false,
-    // 자유 조합 체크박스: 4개 effectiveChangeType 값 중 선택된 것만 표시. 기본 = 모두 켜짐(= 전체).
-    signalTypes: new Set(["신규 편입", "편출", "액티브 매수", "액티브 매도"]),
-  },
-  overviewCache: new Map(),   // key = `${pid}|${window}` → { data, fetchedAt }
-  aggregateCache: null,       // { data, fetchedAt, window }
-  loadingProvider: null,      // 진행 중인 fetch의 provider id — 탭 spinner + topbar 상태 표시용
-  dateCache: new Map(),       // key = `${pid}|${ticker}` → string[]  — Detail view 진입 시 lazy fetch
-  lineup: {
-    favoritesOnly: false,
-    sortKey: "nav_total",      // "name" | "nav_total" | "market_cap"
-    sortDir: "desc",           // "asc" | "desc"
-    visible: LINEUP_PAGE_SIZE,
-  },
-  favorites: new Set(),
-	  detail: {
-	    ticker: "",
-    mode: "single",            // "single" | "range"
-    date_single: "",
-    date_from: "",
-    date_to: "",
-    q: "",
-    type: "all",
-    snapshot: null,            // /etfs/{ticker}/snapshot
-    snapshotKey: "",
-    changes: null,             // /etfs/{ticker}/changes
-    changesKey: "",
-    timeline: null,            // /etfs/{ticker}/timeline
-    timelineKey: "",
-    manifest: null,            // /etfs/{ticker}/manifest
-	    manifestKey: "",
-	  },
-	  marketFlow: {
-	    date: "latest",
-	    resolvedDate: null,
-	    manualDate: false,
-	    limit: 5,
-	    direction: "sell",
-	    data: null,
-	    combined: null,
-	    status: null,
-	    scheduler: null,
-	    loading: false,
-	  },
-	  scheduler: null,             // /providers/{pid}/scheduler
-	};
 
 // ---- api ------------------------------------------------------------------
 
@@ -184,27 +124,11 @@ const apiPost = (path, payload) => apiSend(path, "POST", payload);
 const apiPut = (path, payload) => apiSend(path, "PUT", payload);
 
 const enc = encodeURIComponent;
-const staticCache = new Map();
-
-function staticPath(path) {
-  return `${STATIC_DATA_BASE}/${String(path || "").replace(/^\/+/, "")}`;
-}
-
-async function staticJson(path) {
-  const url = staticPath(path);
-  if (staticCache.has(url)) return staticCache.get(url);
-  const promise = fetch(url).then(async (r) => {
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(body.error || `${url}: ${r.status}`);
-    return body;
-  });
-  staticCache.set(url, promise);
-  return promise;
-}
-
-async function staticEtfData(pid, ticker) {
-  return staticJson(`providers/${enc(pid)}/etfs/${enc(ticker)}.json`);
-}
+const staticClient = createStaticDataClient({
+  base: STATIC_DATA_BASE,
+  recentWindowDefault: RECENT_WINDOW_DEFAULT,
+  marketFlowTitle,
+});
 
 function filterStaticChanges(rows, params = {}) {
   let result = Array.isArray(rows) ? rows.slice() : [];
@@ -251,45 +175,34 @@ function staticReadOnlyError() {
 }
 
 const v2 = {
-  bootstrap: () => isStaticMode() ? staticJson("bootstrap.json") : apiGet("/api/v2/bootstrap"),
+  bootstrap: () => isStaticMode() ? staticClient.json("bootstrap.json") : apiGet("/api/v2/bootstrap"),
   overview: (pid, params) => {
     if (isStaticMode()) {
-      const window = Number(params?.window || RECENT_WINDOW_DEFAULT);
-      return staticJson(`providers/${enc(pid)}/overview-${window}.json`);
+      return staticClient.overview(pid, params);
     }
     const qs = params ? `?${new URLSearchParams(params).toString()}` : "";
     return apiGet(`/api/v2/providers/${enc(pid)}/overview${qs}`);
   },
   snapshot: (pid, ticker, date) => {
     if (isStaticMode()) {
-      return staticEtfData(pid, ticker).then((bundle) => {
-        const latest = bundle.dates?.[bundle.dates.length - 1] || "";
-        const selected = date || latest;
-        return bundle.snapshots?.[selected] || bundle.snapshots?.[latest] || {
-          ticker,
-          snapshot_date: selected,
-          kpis: {},
-          holdings: [],
-          top_changes: { additions: [], removals: [], weight_changes: [] },
-        };
-      });
+      return staticClient.snapshot(pid, ticker, date);
     }
     const q = date ? `?date=${enc(date)}` : "";
     return apiGet(`/api/v2/providers/${enc(pid)}/etfs/${enc(ticker)}/snapshot${q}`);
   },
   dates: (pid, ticker) =>
     isStaticMode()
-      ? staticEtfData(pid, ticker).then((bundle) => ({ dates: bundle.dates || [] }))
+      ? staticClient.dates(pid, ticker)
       : apiGet(`/api/v2/providers/${enc(pid)}/etfs/${enc(ticker)}/dates`),
   changes: (pid, ticker, params) => {
     if (isStaticMode()) {
-      return staticEtfData(pid, ticker).then((bundle) => ({
+      return staticClient.changes(pid, ticker).then((changes) => ({
         ticker,
         from: params.from || "",
         to: params.to || "",
         type: params.type || "all",
         q: params.q || "",
-        changes: filterStaticChanges(bundle.changes || [], params),
+        changes: filterStaticChanges(changes, params),
       }));
     }
     const qs = new URLSearchParams(params).toString();
@@ -297,8 +210,8 @@ const v2 = {
   },
   timeline: (pid, ticker, params) => {
     if (isStaticMode()) {
-      return staticEtfData(pid, ticker).then((bundle) =>
-        groupStaticTimeline(ticker, params, filterStaticChanges(bundle.changes || [], params))
+      return staticClient.changes(pid, ticker).then((changes) =>
+        groupStaticTimeline(ticker, params, filterStaticChanges(changes, params))
       );
     }
     const qs = new URLSearchParams(params).toString();
@@ -306,7 +219,7 @@ const v2 = {
   },
   manifest: (pid, ticker) =>
     isStaticMode()
-      ? staticEtfData(pid, ticker).then((bundle) => ({ ticker, manifest: bundle.manifest || [] }))
+      ? staticClient.manifest(pid, ticker).then((manifest) => ({ ticker, manifest }))
       : apiGet(`/api/v2/providers/${enc(pid)}/etfs/${enc(ticker)}/manifest`),
   scheduler: (pid) => isStaticMode()
     ? Promise.resolve({
@@ -327,17 +240,7 @@ const v2 = {
 	  importSnapshot: (providers) => isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/operations/import", { providers }),
 	  marketFlow: (params) => {
 	    if (isStaticMode()) {
-	      const direction = String(params?.direction || "sell") === "buy" ? "buy" : "sell";
-	      return staticJson(`market/etf-retail-net-${direction}.json`).catch(() => ({
-	        title: marketFlowTitle(direction),
-	        trade_date: null,
-	        limit: Number(params?.limit || 5),
-	        direction,
-	        status: "missing",
-	        message: "정적판에 ETF 수급 캐시가 없습니다.",
-	        rows: [],
-	        text: "",
-	      }));
+	      return staticClient.marketFlow(params);
 	    }
 	    const qs = new URLSearchParams(params || {}).toString();
 	    return apiGet(`/api/v2/market/etf-retail-flow${qs ? `?${qs}` : ""}`);
@@ -346,15 +249,12 @@ const v2 = {
 	    isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/market/etf-retail-flow/refresh", payload),
 	  marketFlowCombined: (params) => {
 	    if (isStaticMode()) {
-	      return Promise.all([
-	        staticJson("market/etf-retail-net-sell.json").catch(() => null),
-	        staticJson("market/etf-retail-net-buy.json").catch(() => null),
-	      ]).then(([sell, buy]) => ({
-	        title: "일간 ETF 개인 순매도·순매수 상위(전일)",
-	        trade_date: sell?.trade_date || buy?.trade_date || null,
-	        sell,
-	        buy,
-	        text: [sell?.text || "", buy?.text || ""].filter((x) => x.trim()).join("\n\n"),
+	      return staticClient.marketCombined(params).then((payload) => ({
+	        title: payload.title || "일간 ETF 개인 순매도·순매수 상위(전일)",
+	        trade_date: payload.trade_date || payload.sell?.trade_date || payload.buy?.trade_date || null,
+	        sell: payload.sell,
+	        buy: payload.buy,
+	        text: payload.text || [payload.sell?.text || "", payload.buy?.text || ""].filter((x) => x.trim()).join("\n\n"),
 	      }));
 	    }
 	    const qs = new URLSearchParams(params || {}).toString();
@@ -976,36 +876,16 @@ function renderLineup() {
     : (state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : "No ETFs");
   body.innerHTML = rows.length === 0
     ? `<tr><td colspan="${colspan}" class="empty">${emptyMsg}</td></tr>`
-    : visibleRows.map((r) => {
-        const isFav = isRowFavorite(r);
-        const providerCell = aggregate
-          ? `<td class="clickable"><span class="provider-badge">${escape(r.provider_label || r.provider_id || "")}</span></td>`
-          : "";
-        let navTotalTitle = "KRX 메타 미수집";
-        if (r.aum_source === "holdings_valuation") {
-          navTotalTitle = `${r.meta_snapshot_date || r.latest_snapshot_date || "-"} 기준 보유 평가금액 합계`;
-        } else if (r.aum_source === "funetf_aum") {
-          navTotalTitle = `${r.meta_snapshot_date || "-"} 기준 FUNETF 설정액`;
-        } else if (r.meta_snapshot_date) {
-          navTotalTitle = `${r.meta_snapshot_date} 기준 NAV × 좌수`;
-        }
-        const mktCapTitle = r.meta_snapshot_date ? `${r.meta_snapshot_date} 기준 종가 × 좌수` : "KRX 메타 미수집";
-        return `
-        <tr data-row-ticker="${escape(r.ticker)}" data-row-pid="${escape(r.provider_id || state.providerId || "")}">
-          <td class="star-col">
-            <button class="star-btn ${isFav ? "on" : ""}" data-fav-ticker="${escape(r.ticker)}" data-fav-pid="${escape(favoritePidForRow(r) || "")}" aria-pressed="${isFav}" title="${isFav ? "관심 해제" : "관심 ETF로 저장"}">${isFav ? "★" : "☆"}</button>
-          </td>
-          ${providerCell}
-          <td class="clickable">${escape(r.name)}</td>
-          <td class="clickable"><code>${escape(r.ticker)}</code></td>
-          <td class="clickable">${escape(r.listing_date || "-")}</td>
-          <td class="clickable">${escape(r.latest_snapshot_date || "-")}</td>
-          <td class="num clickable">${nf.format(r.latest_holding_count || 0)}</td>
-          <td class="num clickable" title="${escape(navTotalTitle)}">${fmtKrUnit(r.nav_total)}</td>
-          <td class="num clickable" title="${escape(mktCapTitle)}">${fmtKrUnit(r.market_cap)}</td>
-          <td class="num clickable">${nf.format(r.change_row_count || 0)}</td>
-        </tr>`;
-      }).join("");
+    : lineupRowsHtml({
+        rows: visibleRows,
+        aggregate,
+        providerId: state.providerId,
+        isRowFavorite,
+        favoritePidForRow,
+        escape,
+        nf,
+        fmtKrUnit,
+      });
 
   const moreBtn = document.querySelector("[data-action='lineup_more']");
   if (moreBtn) {
@@ -1362,21 +1242,9 @@ function renderHoldings(snapshot) {
   if (!snapshot) return;
   const rows = (snapshot.holdings || []).filter((r) => matchQuery(r));
   bind("holdings_count").textContent = nf.format(rows.length);
-  const maxWeight = rows[0]?.weight || 1;
   bind("holdings_body").innerHTML = rows.length === 0
     ? `<tr><td colspan="6" class="empty">No holdings</td></tr>`
-    : rows.map((r, idx) => `
-        <tr>
-          <td class="num">${idx + 1}</td>
-          <td>${escape(r.constituent_name || "-")}</td>
-          <td><code>${escape(r.constituent_code || "")}</code></td>
-          <td class="num">${nf.format(r.quantity || 0)}</td>
-          <td class="num">${fmtMoney(r.valuation)}</td>
-          <td class="num">
-            <span class="weight-bar"><span style="width:${Math.min(100, ((r.weight || 0) / (maxWeight || 1)) * 100)}%"></span></span>
-            ${wt(r.weight)}
-          </td>
-        </tr>`).join("");
+    : holdingsRowsHtml({ rows, escape, nf, fmtMoney, wt });
 
   const tc = snapshot.top_changes || {};
   renderFeed(bind("top_additions"), tc.additions || [], "additions");
@@ -1407,17 +1275,7 @@ function renderChanges(result) {
   bind("changes_count").textContent = nf.format(rows.length);
   bind("changes_body").innerHTML = rows.length === 0
     ? `<tr><td colspan="8" class="empty">No changes</td></tr>`
-    : rows.map((r) => `
-        <tr>
-          <td>${escape(r.snapshot_date)}</td>
-          <td>${escape(r.previous_snapshot_date || "-")}</td>
-          <td><span class="pill ${changeClass(r.change_type)}">${escape(r.change_type)}</span></td>
-          <td>${escape(r.constituent_name || "-")}</td>
-          <td><code>${escape(r.constituent_code || "")}</code></td>
-          <td class="num">${wt(r.previous_weight)}</td>
-          <td class="num">${wt(r.weight)}</td>
-          <td class="num ${deltaClass(r.weight_delta)}">${wt(r.weight_delta)}</td>
-        </tr>`).join("");
+    : changesRowsHtml({ rows, escape, wt, changeClass, deltaClass });
 }
 
 function renderTimeline(result) {
@@ -1442,13 +1300,7 @@ function renderManifest(result) {
   const rows = result?.manifest || [];
   bind("manifest_body").innerHTML = rows.length === 0
     ? `<tr><td colspan="4" class="empty">No manifest</td></tr>`
-    : rows.map((r) => `
-        <tr>
-          <td>${escape(r.snapshot_date)}</td>
-          <td><span class="pill ${r.manifest_status === "ok" ? "positive" : "warn"}">${escape(r.manifest_status)}</span></td>
-          <td>${escape(r.reason || "-")}</td>
-          <td class="num">${nf.format(r.holding_count || 0)}</td>
-        </tr>`).join("");
+    : manifestRowsHtml({ rows, escape, nf });
 }
 
 // ---- Exports (CSV / XLSX / copy) ------------------------------------------
