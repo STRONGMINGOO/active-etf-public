@@ -1010,7 +1010,10 @@ function renderLineup() {
   const moreBtn = document.querySelector("[data-action='lineup_more']");
   if (moreBtn) {
     const remaining = Math.max(0, rows.length - visibleRows.length);
-    moreBtn.hidden = remaining === 0;
+    const moreRow = moreBtn.closest("[data-role='lineup_more_row']");
+    const showMore = remaining > 0;
+    if (moreRow) moreRow.hidden = !showMore;
+    moreBtn.hidden = !showMore;
     moreBtn.textContent = remaining > 0 ? `더보기 ${nf.format(remaining)}` : "더보기";
   }
 

@@ -326,6 +326,14 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
 .table tbody tr.clickable:hover { background: var(--brand-soft); }
 .table tbody td.clickable { cursor: pointer; }
 .table tbody tr:hover td.clickable { background: var(--brand-soft); }
+.lineup-more-row {
+  display: flex;
+  justify-content: center;
+  padding-top: var(--s-2);
+}
+.lineup-more-row .btn-ghost {
+  min-width: 140px;
+}
 .table thead th.star-col,
 .table tbody td.star-col {
   width: 36px;
@@ -1031,6 +1039,9 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   .table thead th,
   .table tbody td {
     padding: var(--s-2);
+  }
+  .lineup-more-row .btn-ghost {
+    width: 100%;
   }
   .feed-row.signal-row,
   .feed-row.signal-row.with-provider {
