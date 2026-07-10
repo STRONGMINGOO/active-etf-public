@@ -7,8 +7,8 @@
   --border: #e6e8eb;
   --border-strong: #d4d8de;
   --text: #0f172a;
-  --text-muted: #64748b;
-  --text-faint: #94a3b8;
+  --text-muted: #475569;
+  --text-faint: #5f6b7a;
   --brand: #2563eb;
   --brand-strong: #1d4ed8;
   --brand-soft: #dbeafe;
@@ -18,7 +18,7 @@
   --negative-soft: #dbeafe;
   --neutral: #475569;
   --neutral-soft: #e2e8f0;
-  --warn: #d97706;
+  --warn: #92400e;
   --warn-soft: #fef3c7;
 
   /* Elevation */

@@ -127,7 +127,6 @@ const enc = encodeURIComponent;
 const staticClient = createStaticDataClient({
   base: STATIC_DATA_BASE,
   recentWindowDefault: RECENT_WINDOW_DEFAULT,
-  marketFlowTitle,
 });
 
 function filterStaticChanges(rows, params = {}) {
@@ -238,40 +237,11 @@ const v2 = {
 	  claimOwner: () => isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/operations/owner"),
 	  exportSnapshot: (providers) => isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/operations/export", { providers }),
 	  importSnapshot: (providers) => isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/operations/import", { providers }),
-	  marketFlow: (params) => {
-	    if (isStaticMode()) {
-	      return staticClient.marketFlow(params);
-	    }
-	    const qs = new URLSearchParams(params || {}).toString();
-	    return apiGet(`/api/v2/market/etf-retail-flow${qs ? `?${qs}` : ""}`);
-	  },
-	  refreshMarketFlow: (payload) =>
-	    isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPost("/api/v2/market/etf-retail-flow/refresh", payload),
-	  marketFlowCombined: (params) => {
-	    if (isStaticMode()) {
-	      return staticClient.marketCombined(params).then((payload) => ({
-	        title: payload.title || "일간 ETF 개인 순매도·순매수 상위(전일)",
-	        trade_date: payload.trade_date || payload.sell?.trade_date || payload.buy?.trade_date || null,
-	        sell: payload.sell,
-	        buy: payload.buy,
-	        text: payload.text || [payload.sell?.text || "", payload.buy?.text || ""].filter((x) => x.trim()).join("\n\n"),
-	      }));
-	    }
-	    const qs = new URLSearchParams(params || {}).toString();
-	    return apiGet(`/api/v2/market/etf-retail-flow/combined${qs ? `?${qs}` : ""}`);
-	  },
-	  marketFlowStatus: () =>
-	    isStaticMode() ? Promise.resolve({ running: false, job: { running: false, phase: "static" }, settings: {} }) : apiGet("/api/v2/market/etf-retail-flow/status"),
-	  marketFlowScheduler: () =>
-	    isStaticMode() ? Promise.resolve({ settings: { enabled: false, update_time: "18:30", allowed_machine_ids: [] }, status: {} }) : apiGet("/api/v2/market/etf-retail-flow/scheduler"),
-	  saveMarketFlowScheduler: (settings) =>
-	    isStaticMode() ? Promise.reject(staticReadOnlyError()) : apiPut("/api/v2/market/etf-retail-flow/scheduler", settings),
 	};
 
 // ---- toast ----------------------------------------------------------------
 
 let toastTimer = null;
-let marketFlowPollTimer = null;
 function toast(message, { error = false } = {}) {
   const el = bind("toast");
   if (!el) return;
@@ -414,7 +384,6 @@ async function start() {
     applyStaticModeUi();
 	    wireGlobalControls();
 	    wireDetailControls();
-	    wireMarketControls();
 	    wireOpsControls();
     wireSubtabs();
     wireLineupSort();
@@ -434,8 +403,6 @@ function applyStaticModeUi() {
   document.body.classList.add("static-mode");
 	  $$("[data-format='xlsx']").forEach((btn) => { btn.hidden = true; });
 	  $$("[data-view='ops']").forEach((btn) => { btn.hidden = true; });
-	  $$("[data-action='market_flow_refresh']").forEach((btn) => { btn.hidden = true; });
-	  document.querySelector(".market-scheduler-row")?.setAttribute("hidden", "");
 	}
 
 function renderProviderTabs() {
@@ -495,11 +462,6 @@ async function switchView(view) {
   }
 	  state.view = view;
 	  renderViewTabs();
-	  if (view === "market") {
-	    loadMarketFlow();
-	    loadMarketFlowScheduler();
-	    pollMarketFlowStatus({ once: true });
-	  }
 	  if (view === "ops") loadScheduler();
 	}
 
@@ -624,21 +586,74 @@ function renderOwnerBadge() {
   if (isStaticMode()) {
     const el = bind("owner_badge");
     el.className = "pill neutral";
-    el.textContent = "Public read-only";
+    el.textContent = "공개 조회 전용";
     return;
   }
   const owner = state.bootstrap.owner;
   const current = state.bootstrap.current_machine;
-  let label = "owner unset";
+  let label = "담당 PC 미지정";
   let cls = "pill warn";
   if (owner) {
     const isOwner = owner.machine_id && owner.machine_id === current.machine_id;
-    label = isOwner ? "Owner PC" : "Reader PC";
+    label = isOwner ? "담당 PC" : "조회 PC";
     cls = isOwner ? "pill positive" : "pill neutral";
   }
   const el = bind("owner_badge");
   el.className = cls;
   el.textContent = label;
+}
+
+function overviewBuildMeta(summary = {}) {
+  const staticMeta = state.bootstrap?.static_site || {};
+  const version = staticMeta.build_version
+    || state.bootstrap?.build_version
+    || state.bootstrap?.app_version
+    || "-";
+  const generatedAt = staticMeta.generated_at
+    || state.bootstrap?.generated_at
+    || summary.generated_at
+    || summary.latest_snapshot_date
+    || "-";
+  return {
+    version,
+    generatedAt: String(generatedAt).replace("T", " ").slice(0, 16),
+  };
+}
+
+function overviewEmptyHtml() {
+  const summary = state.overview?.summary || {};
+  const dataState = summary.data_state || "not_generated";
+  const { version, generatedAt } = overviewBuildMeta(summary);
+  let title = "아직 ETF 데이터가 생성되지 않았습니다.";
+  let detail = "Operations에서 업데이트 상태를 확인하고 데이터를 생성하세요.";
+  if (dataState === "generated_empty") {
+    title = "데이터 생성은 완료됐지만 ETF가 0건입니다.";
+    detail = isStaticMode()
+      ? "이번 공개 생성 결과가 정상 0건입니다. 다음 생성 뒤 다시 확인하세요."
+      : "Operations에서 공급사 응답과 실행 결과를 확인하세요.";
+  } else if (dataState === "ready") {
+    title = "현재 표시할 ETF가 없습니다.";
+    detail = "현재 선택 조건을 확인하세요.";
+  } else if (isStaticMode()) {
+    title = "이번 공개 스냅샷에는 ETF 데이터가 없습니다.";
+    detail = "다음 공개 데이터 생성 뒤 다시 확인하세요.";
+  } else if (!state.bootstrap?.owner) {
+    detail = "먼저 Operations에서 이 PC를 담당 PC로 지정한 뒤 업데이트를 실행하세요.";
+  }
+  const action = isStaticMode()
+    ? ""
+    : '<button class="btn-ghost btn-sm" data-action="open-operations">Operations로 이동</button>';
+  return `<div class="empty-state">
+    <strong>${escape(title)}</strong>
+    <span>${escape(detail)}</span>
+    <small>앱 ${escape(version)} · 생성 ${escape(generatedAt)}</small>
+    ${action}
+  </div>`;
+}
+
+function wireOverviewEmptyAction(root) {
+  const button = root?.querySelector?.("[data-action='open-operations']");
+  if (button) button.onclick = () => switchView("ops");
 }
 
 function wireGlobalControls() {
@@ -748,7 +763,8 @@ function renderOverview() {
   const o = state.overview;
   const summary = o.summary || {};
   const meta = bind("bootstrap_meta");
-  meta.textContent = `${summary.etf_count || 0} ETFs · ${summary.latest_snapshot_date || "-"}`;
+  const { version, generatedAt } = overviewBuildMeta(summary);
+  meta.textContent = `${summary.etf_count || 0} ETFs · 기준 ${summary.latest_snapshot_date || "-"} · 앱 ${version} · 생성 ${generatedAt}`;
 
   const feedRowsRaw = o.recent_changes_feed || o.recent_changes_top || [];
   const feedRows = feedRowsRaw.filter(isCommonStockConstituent);
@@ -873,7 +889,7 @@ function renderLineup() {
   const colspan = aggregate ? 10 : 9;
   const emptyMsg = aggregate
     ? "관심 ETF 없음 — 펀드 탭에서 별을 눌러 추가하세요"
-    : (state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : "No ETFs");
+    : (state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : overviewEmptyHtml());
   body.innerHTML = rows.length === 0
     ? `<tr><td colspan="${colspan}" class="empty">${emptyMsg}</td></tr>`
     : lineupRowsHtml({
@@ -886,6 +902,7 @@ function renderLineup() {
         nf,
         fmtKrUnit,
       });
+  wireOverviewEmptyAction(body);
 
   const moreBtn = document.querySelector("[data-action='lineup_more']");
   if (moreBtn) {
@@ -980,8 +997,13 @@ function renderRecentChanges() {
   const countEl = bind("recent_changes_count");
   if (countEl) countEl.textContent = nf.format(total);
 
+  const noRecentMessage = aggregate || favOnly
+    ? "관심 ETF의 최근 변화가 없습니다."
+    : (Number(o.summary?.etf_count || 0) === 0
+        ? overviewEmptyHtml()
+        : `최근 ${state.recent.window}거래일에 편입·편출·액티브 매매 변화가 없습니다.`);
   feed.innerHTML = total === 0
-    ? `<div class="empty">${aggregate || favOnly ? "관심 ETF의 변화 없음" : "No recent changes"}</div>`
+    ? `<div class="empty">${noRecentMessage}</div>`
     : (() => {
         let prevDate = "";
         return shown.map((r) => {
@@ -1032,6 +1054,7 @@ function renderRecentChanges() {
         </div>`;
         }).join("");
       })();
+  wireOverviewEmptyAction(feed);
 
   const moreBtn = document.querySelector("[data-action='recent_changes_more']");
   if (moreBtn) moreBtn.hidden = visible >= total;
@@ -1463,308 +1486,6 @@ async function writeClipboard(text) {
   ta.select();
   document.execCommand("copy");
   ta.remove();
-}
-
-// ---- Market ETF retail flow -------------------------------------------------
-
-function marketFlowTitle(direction) {
-  return `일간 ETF 개인 ${direction === "buy" ? "순매수" : "순매도"} 상위(전일)`;
-}
-
-function marketStatusClass(status) {
-  if (status === "complete" || status === "cached") return "pill positive";
-  if (status === "partial" || status === "running") return "pill warn";
-  if (status === "failed") return "pill negative";
-  return "pill neutral";
-}
-
-function renderMarketFlow() {
-  const data = state.marketFlow.data;
-  const statusData = state.marketFlow.status || {};
-  const job = statusData.job || {};
-  const statusEl = bind("market_flow_status");
-  const countEl = bind("market_flow_count");
-  const dateEl = $("[data-control='market_flow_date']");
-  const limitEl = $("[data-control='market_flow_limit']");
-  const directionEl = $("[data-control='market_flow_direction']");
-  const direction = data?.direction || state.marketFlow.direction || "sell";
-  if (dateEl && data?.trade_date) dateEl.value = data.trade_date;
-  if (limitEl) limitEl.value = String(state.marketFlow.limit);
-  if (directionEl) directionEl.value = direction;
-  const titleEl = bind("market_flow_title");
-  if (titleEl) titleEl.textContent = data?.title || marketFlowTitle(direction);
-  const valueHeader = bind("market_flow_value_header");
-  if (valueHeader) valueHeader.textContent = `개인 ${direction === "buy" ? "순매수" : "순매도"}`;
-
-  const status = (state.marketFlow.loading || job.running) ? "running" : (data?.status || "missing");
-  if (statusEl) {
-    statusEl.className = marketStatusClass(status);
-    statusEl.textContent = (state.marketFlow.loading || job.running) ? (job.phase || "running") : status;
-  }
-  const progressEl = bind("market_flow_progress");
-  if (progressEl) {
-    const total = Number(job.total || 0);
-    const attempted = Number(job.attempted || 0);
-    const progress = job.running && total > 0 ? `${job.phase || "수집"} ${nf.format(attempted)}/${nf.format(total)}` : "";
-    progressEl.textContent = progress || (job.message || "");
-  }
-
-  const rows = data?.rows || [];
-  if (countEl) countEl.textContent = nf.format(rows.length);
-  const run = data?.run || {};
-  const kpis = [
-    { label: "기준일", value: data?.trade_date || "-" },
-    { label: "상태", value: state.marketFlow.loading ? "loading" : (data?.status || "-") },
-    { label: "성공", value: run.succeeded != null ? nf.format(run.succeeded) : "-" },
-    { label: "실패", value: run.failed != null ? nf.format(run.failed) : "-" },
-    { label: "갱신", value: data?.updated_at ? String(data.updated_at).replace("T", " ") : "-" },
-  ];
-  const kpiHost = bind("market_flow_kpis");
-  if (kpiHost) {
-    kpiHost.innerHTML = kpis.map((k) => (
-      `<div class="kpi">
-        <span class="kpi-label">${escape(k.label)}</span>
-        <span class="kpi-value">${escape(k.value)}</span>
-      </div>`
-    )).join("");
-  }
-
-  const body = bind("market_flow_body");
-  if (body) {
-    const valueClass = direction === "buy" ? "delta-positive" : "delta-negative";
-    body.innerHTML = rows.length === 0
-      ? `<tr><td colspan="5" class="empty">${escape(data?.message || "수집 데이터 없음")}</td></tr>`
-      : rows.map((r) => `
-          <tr>
-            <td class="num">${nf.format(r.rank || 0)}</td>
-            <td>${escape(r.name || "-")}</td>
-            <td><code>${escape(r.ticker || "-")}</code></td>
-            <td class="num ${valueClass}">${escape(r.net_buy_value_uk || fmtKrUnit(r.net_buy_value))}</td>
-            <td class="market-components">${escape(r.holding_summary || "PDF 구성종목 확인 불가")}</td>
-          </tr>
-        `).join("");
-  }
-  const textEl = bind("market_flow_text");
-  if (textEl) {
-    textEl.textContent = data?.text || data?.message || "수집 데이터 없음";
-  }
-  renderMarketFlowDiagnostics(data?.diagnostics || {});
-  renderMarketFlowScheduler();
-}
-
-async function loadMarketFlow({ refresh = false, force = false } = {}) {
-  if (!force && !refresh && state.marketFlow.data) {
-    renderMarketFlow();
-    return;
-  }
-  state.marketFlow.loading = true;
-  renderMarketFlow();
-  try {
-    const payload = {
-      date: refresh && !state.marketFlow.manualDate ? "latest" : state.marketFlow.date || "latest",
-      limit: state.marketFlow.limit,
-      direction: state.marketFlow.direction || "sell",
-    };
-    if (refresh) {
-      state.marketFlow.status = await v2.refreshMarketFlow(payload);
-      startMarketFlowPolling();
-    } else {
-      state.marketFlow.data = await v2.marketFlow(payload);
-      if (state.marketFlow.data?.trade_date) {
-        state.marketFlow.resolvedDate = state.marketFlow.data.trade_date;
-        if (state.marketFlow.manualDate) state.marketFlow.date = state.marketFlow.data.trade_date;
-      }
-      if (state.marketFlow.data?.direction) state.marketFlow.direction = state.marketFlow.data.direction;
-    }
-  } catch (err) {
-    toast(err.message, { error: true });
-  } finally {
-    state.marketFlow.loading = false;
-    renderMarketFlow();
-  }
-}
-
-async function pollMarketFlowStatus({ once = false } = {}) {
-  try {
-    state.marketFlow.status = await v2.marketFlowStatus();
-    renderMarketFlow();
-    if (state.marketFlow.status?.running || state.marketFlow.status?.job?.running) {
-      if (!once) startMarketFlowPolling();
-      return;
-    }
-    if (!once && state.view === "market") {
-      await loadMarketFlow({ force: true });
-    }
-  } catch (err) {
-    toast(err.message, { error: true });
-  }
-}
-
-function startMarketFlowPolling() {
-  clearTimeout(marketFlowPollTimer);
-  marketFlowPollTimer = setTimeout(async () => {
-    await pollMarketFlowStatus();
-  }, 1500);
-}
-
-async function loadMarketFlowScheduler() {
-  try {
-    state.marketFlow.scheduler = await v2.marketFlowScheduler();
-    renderMarketFlowScheduler();
-  } catch (err) {
-    toast(err.message, { error: true });
-  }
-}
-
-function renderMarketFlowScheduler() {
-  const settings = state.marketFlow.scheduler?.settings || state.marketFlow.status?.settings || {};
-  const current = state.bootstrap?.current_machine || {};
-  const allowed = new Set(settings.allowed_machine_ids || []);
-  const enabledEl = $("[data-control='market_sched_enabled']");
-  const timeEl = $("[data-control='market_sched_time']");
-  const allowedEl = $("[data-control='market_sched_current_allowed']");
-  if (enabledEl) enabledEl.checked = !!settings.enabled;
-  if (timeEl) timeEl.value = settings.update_time || "18:30";
-  if (allowedEl) allowedEl.checked = current.machine_id ? allowed.has(current.machine_id) : false;
-  const statusEl = bind("market_sched_status");
-  if (statusEl) {
-    const status = settings.last_status || "ready";
-    statusEl.className = marketStatusClass(status === "success" ? "complete" : status);
-    statusEl.textContent = status;
-  }
-}
-
-function collectMarketFlowSchedulerSettings() {
-  const base = state.marketFlow.scheduler?.settings || state.marketFlow.status?.settings || {};
-  const current = state.bootstrap?.current_machine || {};
-  const machines = new Set(base.allowed_machine_ids || []);
-  if ($("[data-control='market_sched_current_allowed']")?.checked && current.machine_id) machines.add(current.machine_id);
-  if (!$("[data-control='market_sched_current_allowed']")?.checked && current.machine_id) machines.delete(current.machine_id);
-  return {
-    ...base,
-    enabled: !!$("[data-control='market_sched_enabled']")?.checked,
-    update_time: $("[data-control='market_sched_time']")?.value || "18:30",
-    allowed_machine_ids: [...machines],
-  };
-}
-
-function renderMarketFlowDiagnostics(diagnostics) {
-  const errors = diagnostics.errors || [];
-  const gaps = diagnostics.holding_gaps || [];
-  const total = Number(diagnostics.error_count || errors.length || 0) + Number(diagnostics.holding_gap_count || gaps.length || 0);
-  const countEl = bind("market_flow_diagnostics_count");
-  if (countEl) countEl.textContent = nf.format(total);
-  const host = bind("market_flow_diagnostics");
-  if (!host) return;
-  const rows = [
-    ...errors.map((row) => ({ type: "수집 실패", ...row })),
-    ...gaps.map((row) => ({ type: "PDF 누락", ...row })),
-  ];
-  host.innerHTML = rows.length === 0
-    ? `<div class="empty">진단 항목 없음</div>`
-    : rows.slice(0, 80).map((row) => `
-        <div class="feed-row with-date">
-          <span class="date">${escape(row.trade_date || "")}</span>
-          <span class="etf-tag">${escape(row.ticker || "")}</span>
-          <span class="name">${escape(row.name || row.type || "")}</span>
-          <span class="pill warn">${escape(row.type || row.status || "")}</span>
-          <span class="etf-name">${escape(row.message || "")}</span>
-        </div>
-      `).join("");
-}
-
-async function copyMarketFlowText() {
-  const text = state.marketFlow.data?.text || "";
-  if (!text.trim()) {
-    toast("복사할 본문이 없습니다.", { error: true });
-    return;
-  }
-  await writeClipboard(text);
-  toast("ETF 수급 본문이 복사되었습니다.");
-}
-
-async function copyBothMarketFlowText() {
-  try {
-    const payload = await v2.marketFlowCombined({
-      date: state.marketFlow.date || "latest",
-      limit: state.marketFlow.limit,
-    });
-    state.marketFlow.combined = payload;
-    const text = payload?.text || "";
-    if (!text.trim()) {
-      toast("복사할 통합 본문이 없습니다.", { error: true });
-      return;
-    }
-    await writeClipboard(text);
-    toast("순매도·순매수 본문이 함께 복사되었습니다.");
-  } catch (err) {
-    toast(err.message, { error: true });
-  }
-}
-
-function syncMarketFlowDateInput(dateEl) {
-  if (!dateEl) return;
-  const value = dateEl.value || "";
-  if (!value) {
-    state.marketFlow.manualDate = false;
-    state.marketFlow.date = "latest";
-    return;
-  }
-  if (state.marketFlow.manualDate || value !== state.marketFlow.resolvedDate) {
-    state.marketFlow.manualDate = true;
-    state.marketFlow.date = value;
-    return;
-  }
-  state.marketFlow.date = "latest";
-}
-
-function wireMarketControls() {
-  const dateEl = $("[data-control='market_flow_date']");
-  if (dateEl) {
-    dateEl.addEventListener("change", () => {
-      state.marketFlow.date = dateEl.value || "latest";
-      state.marketFlow.manualDate = Boolean(dateEl.value);
-    });
-  }
-  const limitEl = $("[data-control='market_flow_limit']");
-  if (limitEl) {
-    limitEl.value = String(state.marketFlow.limit);
-    limitEl.addEventListener("change", () => {
-      state.marketFlow.limit = Number(limitEl.value) || 5;
-    });
-  }
-  const directionEl = $("[data-control='market_flow_direction']");
-  if (directionEl) {
-    directionEl.value = state.marketFlow.direction;
-    directionEl.addEventListener("change", () => {
-      state.marketFlow.direction = directionEl.value || "sell";
-    });
-  }
-  document.querySelector("[data-action='market_flow_load']")?.addEventListener("click", () => {
-    syncMarketFlowDateInput(dateEl);
-    if (limitEl) state.marketFlow.limit = Number(limitEl.value) || 5;
-    if (directionEl) state.marketFlow.direction = directionEl.value || "sell";
-    loadMarketFlow({ force: true });
-  });
-  document.querySelector("[data-action='market_flow_refresh']")?.addEventListener("click", () => {
-    syncMarketFlowDateInput(dateEl);
-    if (limitEl) state.marketFlow.limit = Number(limitEl.value) || 5;
-    if (directionEl) state.marketFlow.direction = directionEl.value || "sell";
-    loadMarketFlow({ refresh: true, force: true });
-  });
-  document.querySelector("[data-action='market_flow_copy_both']")?.addEventListener("click", copyBothMarketFlowText);
-  document.querySelector("[data-action='market_sched_save']")?.addEventListener("click", async () => {
-    try {
-      state.marketFlow.scheduler = await v2.saveMarketFlowScheduler(collectMarketFlowSchedulerSettings());
-      renderMarketFlowScheduler();
-      toast("ETF 수급 자동 수집 설정 저장.");
-    } catch (err) {
-      toast(err.message, { error: true });
-    }
-  });
-  $$("[data-action='market_flow_copy'], [data-action='market_flow_copy_secondary']").forEach((btn) => {
-    btn.addEventListener("click", copyMarketFlowText);
-  });
 }
 
 // ---- Operations view ------------------------------------------------------

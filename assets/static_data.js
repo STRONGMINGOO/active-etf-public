@@ -1,6 +1,6 @@
 const enc = encodeURIComponent;
 
-export function createStaticDataClient({ base, recentWindowDefault, marketFlowTitle }) {
+export function createStaticDataClient({ base, recentWindowDefault }) {
   const dataBase = String(base || "").replace(/\/+$/, "");
   const cache = new Map();
 
@@ -96,26 +96,5 @@ export function createStaticDataClient({ base, recentWindowDefault, marketFlowTi
     return legacyEtfBundle(pid, ticker).then((bundle) => bundle.manifest || []);
   }
 
-  async function marketFlow(params = {}) {
-    const direction = String(params?.direction || "sell") === "buy" ? "buy" : "sell";
-    return json(`market/etf-retail-net-${direction}.json`).catch(() => ({
-      title: marketFlowTitle(direction),
-      trade_date: null,
-      limit: Number(params?.limit || 5),
-      direction,
-      status: "missing",
-      message: "정적판에 ETF 수급 캐시가 없습니다.",
-      rows: [],
-      text: "",
-    }));
-  }
-
-  async function marketCombined(params = {}) {
-    return json("market/etf-retail-flow-combined.json").catch(async () => ({
-      sell: await marketFlow({ ...params, direction: "sell" }),
-      buy: await marketFlow({ ...params, direction: "buy" }),
-    }));
-  }
-
-  return { json, overview, dates, snapshot, changes, manifest, marketFlow, marketCombined };
+  return { json, overview, dates, snapshot, changes, manifest };
 }

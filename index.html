@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="assets/main.css">
     <script>
     window.ACTIVE_ETF_STATIC_DATA_BASE = "data";
-    window.ACTIVE_ETF_STATIC_BUILD_VERSION = "2026.07.09.20";
+    window.ACTIVE_ETF_STATIC_BUILD_VERSION = "2026.07.10.12";
   </script>
   <script type="module" src="assets/app.js"></script>
 </head>
@@ -36,7 +36,6 @@
     <nav class="provider-tabs" data-bind="provider_tabs"></nav>
 	    <nav class="view-tabs">
 	      <button class="view-tab" data-view="overview">Overview</button>
-	      <button class="view-tab" data-view="market">ETF 수급</button>
 	      <button class="view-tab" data-view="detail">Detail</button>
 	      <button class="view-tab" data-view="ops">Operations</button>
 	    </nav>
@@ -144,99 +143,6 @@
       <!-- KPI strip moved to bottom: at-a-glance totals are reference info,
            not the primary scan; lineup + signals deserve top fold. -->
       <div class="kpi-strip" data-bind="overview_kpis"></div>
-	    </section>
-	
-	    <!-- ====== ETF market flow ====== -->
-	    <section class="view" data-view-pane="market" hidden>
-	      <div class="card market-toolbar">
-	        <div class="card-head">
-	          <h2 data-bind="market_flow_title">일간 ETF 개인 순매도 상위(전일)</h2>
-	          <div class="row-actions">
-	            <label class="field compact">
-	              <span>구분</span>
-	              <select data-control="market_flow_direction">
-	                <option value="sell">순매도</option>
-	                <option value="buy">순매수</option>
-	              </select>
-	            </label>
-	            <label class="field compact">
-	              <span>기준일</span>
-	              <input type="date" data-control="market_flow_date">
-	            </label>
-	            <label class="field compact">
-	              <span>건수</span>
-	              <select data-control="market_flow_limit">
-	                <option value="5">5</option>
-	                <option value="10">10</option>
-	                <option value="20">20</option>
-	                <option value="50">50</option>
-	              </select>
-	            </label>
-	            <button class="btn-ghost" data-action="market_flow_load">조회</button>
-	            <button class="btn-primary" data-action="market_flow_refresh">새로고침</button>
-	            <button class="btn-ghost" data-action="market_flow_copy">본문 복사</button>
-	            <button class="btn-ghost" data-action="market_flow_copy_both">양쪽 복사</button>
-	            <span class="pill" data-bind="market_flow_status">-</span>
-	          </div>
-	        </div>
-	        <div class="kpi-strip" data-bind="market_flow_kpis"></div>
-	        <div class="market-scheduler-row">
-	          <label class="field compact toggle-field">
-	            <span>자동 수집</span>
-	            <span class="toggle-host"><input type="checkbox" class="toggle-switch" data-control="market_sched_enabled"></span>
-	          </label>
-	          <label class="field compact">
-	            <span>시각</span>
-	            <input type="time" data-control="market_sched_time" value="18:30">
-	          </label>
-	          <label class="field compact toggle-field">
-	            <span>이 PC 허용</span>
-	            <span class="toggle-host"><input type="checkbox" class="toggle-switch" data-control="market_sched_current_allowed"></span>
-	          </label>
-	          <button class="btn-ghost" data-action="market_sched_save">자동 수집 저장</button>
-	          <span class="pill" data-bind="market_sched_status">-</span>
-	          <span class="muted" data-bind="market_flow_progress"></span>
-	        </div>
-	      </div>
-	
-	      <div class="market-grid">
-	        <div class="card">
-	          <div class="card-head compact">
-	            <h3>순위</h3>
-	            <span class="pill" data-bind="market_flow_count">0</span>
-	          </div>
-	          <div class="table-scroll">
-	            <table class="table market-flow-table">
-	              <thead>
-	                <tr>
-	                  <th class="num">#</th>
-	                  <th>ETF</th>
-	                  <th>코드</th>
-	                  <th class="num" data-bind="market_flow_value_header">개인 순매도</th>
-	                  <th>주요 구성</th>
-	                </tr>
-	              </thead>
-	              <tbody data-bind="market_flow_body"></tbody>
-	            </table>
-	          </div>
-	        </div>
-	
-	        <div class="card">
-	          <div class="card-head compact">
-	            <h3>복사용 본문</h3>
-	            <button class="btn-ghost btn-sm" data-action="market_flow_copy_secondary">복사</button>
-	          </div>
-	          <pre class="copy-block" data-bind="market_flow_text"></pre>
-	        </div>
-	      </div>
-	
-	      <div class="card">
-	        <div class="card-head compact">
-	          <h3>오류 진단</h3>
-	          <span class="pill" data-bind="market_flow_diagnostics_count">0</span>
-	        </div>
-	        <div class="feed compact" data-bind="market_flow_diagnostics"></div>
-	      </div>
 	    </section>
 	
 	    <!-- ====== Detail ====== -->

@@ -45,17 +45,5 @@ export const state = {
     manifest: null,
     manifestKey: "",
   },
-  marketFlow: {
-    date: "latest",
-    resolvedDate: null,
-    manualDate: false,
-    limit: 5,
-    direction: "sell",
-    data: null,
-    combined: null,
-    status: null,
-    scheduler: null,
-    loading: false,
-  },
   scheduler: null,
 };
