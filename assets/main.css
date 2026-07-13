@@ -123,14 +123,13 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
   color: var(--brand);
   box-shadow: var(--shadow-card);
 }
-.provider-tabs button.favorites-tab {
-  margin-left: var(--s-2);
-  border-left: 1px solid var(--border);
-  padding-left: var(--s-3);
-  color: var(--accent, #f5a623);
+.provider-tabs button.aggregate-tab {
+  margin-right: var(--s-2);
+  border-right: 1px solid var(--border);
+  padding-right: var(--s-3);
 }
-.provider-tabs button.favorites-tab[aria-current="true"] {
-  color: var(--accent, #f5a623);
+.provider-tabs button.aggregate-tab[aria-current="true"] {
+  color: var(--brand);
   background: var(--surface);
 }
 
@@ -1185,7 +1184,6 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
 
 
 @media (max-width: 360px) {
-  .lineup-table .col-provider,
   .lineup-table .col-code {
     display: none;
   }

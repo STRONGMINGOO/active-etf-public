@@ -2,7 +2,7 @@ export const RECENT_PAGE_SIZE = 20;
 export const RECENT_WINDOW_DEFAULT = 5;
 export const LINEUP_PAGE_SIZE = 10;
 export const OVERVIEW_CACHE_TTL_MS = 60_000;
-export const AGGREGATE_PROVIDER_ID = "__favorites__";
+export const AGGREGATE_PROVIDER_ID = "__all__";
 
 export const state = {
   bootstrap: null,

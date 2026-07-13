@@ -89,7 +89,12 @@ function realProviderIds() {
   return (state.bootstrap?.providers || []).map((p) => p.provider_id);
 }
 
+function defaultRealProviderId() {
+  return realProviderIds()[0] || "";
+}
+
 function providerLabel(pid) {
+  if (pid === AGGREGATE_PROVIDER_ID) return "전체";
   const p = (state.bootstrap?.providers || []).find((x) => x.provider_id === pid);
   return p ? (p.brand_name || p.display_name || pid) : pid;
 }
@@ -177,7 +182,7 @@ function normalizeNavigationTarget(raw = {}) {
   let view = NAVIGATION_VIEWS.has(raw.view) ? raw.view : "overview";
   if (isStaticMode() && view === "ops") view = "overview";
   if (providerId === AGGREGATE_PROVIDER_ID && view !== "overview") {
-    providerId = state.bootstrap?.default_provider || realProviderIds()[0] || providerId;
+    providerId = defaultRealProviderId() || providerId;
   }
   return {
     providerId,
@@ -504,10 +509,12 @@ function applyStaticModeUi() {
 
 function renderProviderTabs() {
   const host = bind("provider_tabs");
-  const tabs = state.bootstrap.providers.map((p) =>
+  const tabs = [
+    `<button class="aggregate-tab" data-pid="${AGGREGATE_PROVIDER_ID}" title="모든 브랜드의 ETF를 한 번에 모아보기">전체</button>`,
+  ];
+  tabs.push(...state.bootstrap.providers.map((p) =>
     `<button data-pid="${escape(p.provider_id)}">${escape(p.brand_name || p.display_name)}</button>`
-  );
-  tabs.push(`<button class="favorites-tab" data-pid="${AGGREGATE_PROVIDER_ID}" title="모든 펀드의 관심 ETF 모아보기">★ 관심</button>`);
+  ));
   host.innerHTML = tabs.join("");
   $$("[data-pid]", host).forEach((btn) => {
     btn.setAttribute("aria-current", String(btn.dataset.pid === state.providerId));
@@ -517,7 +524,7 @@ function renderProviderTabs() {
   // 상단 메타 텍스트도 동기화 — 로딩 중이면 어느 provider인지 즉시 인지 가능.
   const metaEl = bind("bootstrap_meta");
   if (metaEl && state.loadingProvider) {
-    const label = state.loadingProvider === AGGREGATE_PROVIDER_ID ? "관심 ETF" : providerLabel(state.loadingProvider);
+    const label = providerLabel(state.loadingProvider);
     metaEl.textContent = `${label} 데이터 불러오는 중…`;
   }
 }
@@ -548,7 +555,7 @@ function overviewStatusData(pid, dataState, error = "") {
     recent_changes_window: state.recent.window,
     summary: {
       provider_id: pid,
-      provider_label: pid === AGGREGATE_PROVIDER_ID ? "관심 ETF" : providerLabel(pid),
+      provider_label: providerLabel(pid),
       data_state: dataState,
       load_error: error,
       etf_count: 0,
@@ -572,7 +579,7 @@ async function switchView(view, { historyMode = "push", navEpoch = null } = {}) 
   // real provider first. Auto-switch to the default provider rather than show
   // a broken pane.
   if ((view === "ops" || view === "detail") && isAggregateMode()) {
-    const fallback = state.bootstrap?.default_provider || realProviderIds()[0];
+    const fallback = defaultRealProviderId();
     if (fallback) {
       await switchProvider(fallback, { historyMode: "none", navEpoch: epoch });
       if (epoch !== navigationEpoch) return;
@@ -606,7 +613,7 @@ async function switchProvider(pid, { historyMode = "push", navEpoch = null, forc
     initDetailControls();
   }
   if (pid === AGGREGATE_PROVIDER_ID) {
-    state.favorites = new Set();   // not meaningful in aggregate mode
+    state.favorites = new Set();   // aggregate mode reads each provider's saved set directly
     renderProviderTabs();
     // Ops/Detail views don't have cross-provider semantics yet — snap back to
     // overview so the user lands on the place the aggregate mode actually fills.
@@ -746,7 +753,6 @@ async function loadAggregate({ force = false } = {}) {
         state.overviewCache.set(result.cacheKey, { data: result.data, fetchedAt: Date.now() });
       }
     }
-    const allFavs = readAllFavorites();
     const etfRows = [];
     const feedRows = [];
     let etfTotal = 0;
@@ -755,7 +761,6 @@ async function loadAggregate({ force = false } = {}) {
     let truncated = false;
     let rowCap = 0;
     for (const { pid, data } of overviews) {
-      const favSet = allFavs.get(pid) || new Set();
       const summary = data.summary || {};
       etfTotal += summary.etf_count || 0;
       changeRowTotal += summary.change_row_count || 0;
@@ -764,11 +769,11 @@ async function loadAggregate({ force = false } = {}) {
       rowCap = Math.max(rowCap, data.recent_changes_row_cap || 0);
       const label = providerLabel(pid);
       for (const r of (data.etfSummaryRows || [])) {
-        if (favSet.has(r.ticker)) etfRows.push({ ...r, provider_id: pid, provider_label: label });
+        etfRows.push({ ...r, provider_id: pid, provider_label: label });
       }
       const feedSource = data.recent_changes_feed || data.recent_changes_top || [];
       for (const r of feedSource) {
-        if (favSet.has(r.ticker)) feedRows.push({ ...r, provider_id: pid, provider_label: label });
+        feedRows.push({ ...r, provider_id: pid, provider_label: label });
       }
     }
     feedRows.sort((a, b) => (b.snapshot_date || "").localeCompare(a.snapshot_date || ""));
@@ -1179,8 +1184,10 @@ function renderOverview() {
   renderRecentChanges();
 }
 
-function isRowFavorite(row) {
-  if (isAggregateMode()) return true;
+function isRowFavorite(row, aggregateFavorites = null) {
+  if (isAggregateMode()) {
+    return Boolean(aggregateFavorites?.get(row.provider_id)?.has(row.ticker));
+  }
   return state.favorites.has(row.ticker);
 }
 
@@ -1244,9 +1251,11 @@ function renderLineup() {
   const aggregate = isAggregateMode();
   const allRows = (o.etfSummaryRows || []);
   const favSet = state.favorites;
-  const favoritesFiltered = aggregate
-    ? allRows
-    : (state.lineup.favoritesOnly ? allRows.filter((r) => favSet.has(r.ticker)) : allRows);
+  const aggregateFavorites = aggregate ? readAllFavorites() : null;
+  const rowIsFavorite = (row) => isRowFavorite(row, aggregateFavorites);
+  const favoritesFiltered = state.lineup.favoritesOnly
+    ? allRows.filter(rowIsFavorite)
+    : allRows;
   const productQuery = normalizeLineupSearchQuery(state.lineup.productQuery);
   const holdingQuery = normalizeLineupSearchQuery(state.lineup.holdingQuery);
   const productFiltered = productQuery
@@ -1299,8 +1308,8 @@ function renderLineup() {
 
   const lineupToggle = $("[data-control='lineup_favorites_only']");
   const lineupToggleLabel = lineupToggle?.closest("label");
-  if (lineupToggle) lineupToggle.checked = aggregate ? true : state.lineup.favoritesOnly;
-  if (lineupToggleLabel) lineupToggleLabel.hidden = aggregate;
+  if (lineupToggle) lineupToggle.checked = state.lineup.favoritesOnly;
+  if (lineupToggleLabel) lineupToggleLabel.hidden = false;
 
   const lineupProviderTh = document.querySelector("[data-bind-th='lineup_provider']");
   if (lineupProviderTh) lineupProviderTh.hidden = !aggregate;
@@ -1320,8 +1329,6 @@ function renderLineup() {
     } else {
       emptyMsg = `“${escape(holdingQuery)}” 구성종목 검색 결과가 없습니다.`;
     }
-  } else if (aggregate) {
-    emptyMsg = "관심 ETF 없음 — 펀드 탭에서 별을 눌러 추가하세요";
   } else {
     emptyMsg = state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : overviewEmptyHtml();
   }
@@ -1331,7 +1338,7 @@ function renderLineup() {
         rows: visibleRows,
         aggregate,
         providerId: state.providerId,
-        isRowFavorite,
+        isRowFavorite: rowIsFavorite,
         favoritePidForRow,
         escape,
         nf,
@@ -1356,10 +1363,8 @@ function renderLineup() {
       if (!pid) return;
       toggleFavorite(pid, btn.dataset.favTicker);
       if (aggregate) {
-        // Aggregate slice depends on the favorites set we just mutated — bust its cache
-        // so the next render reflects the toggle instead of showing the stale snapshot.
-        state.aggregateCache = null;
-        loadAggregate({ force: true }).catch(() => {});
+        renderLineup();
+        renderRecentChanges();
       } else {
         state.favorites = readFavorites(pid);
         renderLineup();
@@ -1400,12 +1405,17 @@ function renderRecentChanges() {
   if (!feed) return;
   const aggregate = isAggregateMode();
   const items = o.recent_changes_feed || o.recent_changes_top || [];
-  const favOnly = aggregate ? true : state.recent.favoritesOnly;
+  const favOnly = state.recent.favoritesOnly;
   const favSet = state.favorites;
+  const aggregateFavorites = aggregate ? readAllFavorites() : null;
   const commonStockFiltered = items.filter(isCommonStockConstituent);
-  const favFiltered = aggregate
-    ? commonStockFiltered                                // aggregate payload is already favorites-only
-    : (favOnly ? commonStockFiltered.filter((r) => favSet.has(r.ticker)) : commonStockFiltered);
+  const favFiltered = favOnly
+    ? commonStockFiltered.filter((row) => (
+        aggregate
+          ? Boolean(aggregateFavorites?.get(row.provider_id)?.has(row.ticker))
+          : favSet.has(row.ticker)
+      ))
+    : commonStockFiltered;
   // Multi-select 체크박스 — 선택된 effectiveChangeType만 통과. 4개 모두 켜져 있으면
   // 사실상 "전체"와 동일하지만 비교 비용은 무시 가능.
   const allowedTypes = state.recent.signalTypes;
@@ -1420,7 +1430,7 @@ function renderRecentChanges() {
   const recentToggle = $("[data-control='recent_favorites_only']");
   const recentToggleLabel = recentToggle?.closest("label");
   if (recentToggle) recentToggle.checked = favOnly;
-  if (recentToggleLabel) recentToggleLabel.hidden = aggregate;   // redundant in aggregate mode
+  if (recentToggleLabel) recentToggleLabel.hidden = false;
 
   const windowSelect = $("[data-control='recent_window']");
   if (windowSelect && Number(windowSelect.value) !== state.recent.window) {
@@ -1439,7 +1449,7 @@ function renderRecentChanges() {
 
   const noRecentMessage = o.summary?.data_state === "loading" || o.summary?.data_state === "load_error"
     ? overviewEmptyHtml()
-    : (aggregate || favOnly
+    : (favOnly
         ? "관심 ETF의 최근 변화가 없습니다."
         : (Number(o.summary?.etf_count || 0) === 0
             ? overviewEmptyHtml()
