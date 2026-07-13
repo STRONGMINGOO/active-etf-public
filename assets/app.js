@@ -100,6 +100,93 @@ function readAllFavorites() {
   return out;
 }
 
+// Same-document navigation keeps browser Back/Forward inside the dashboard.
+// Query parameters are used instead of path segments so GitHub Pages keeps
+// resolving the existing relative assets and static data directory unchanged.
+const NAVIGATION_STATE_KEY = "activeEtfDashboard";
+const NAVIGATION_VIEWS = new Set(["overview", "detail", "ops"]);
+const DETAIL_SUBTABS = new Set(["holdings", "changes", "timeline", "manifest"]);
+let navigationEpoch = 0;
+let providerSwitchRequestId = 0;
+let overviewLoadGeneration = 0;
+let aggregateLoadGeneration = 0;
+
+function beginNavigation() {
+  navigationEpoch += 1;
+  return navigationEpoch;
+}
+
+function navigationStateFromApp() {
+  const nav = {
+    [NAVIGATION_STATE_KEY]: true,
+    providerId: state.providerId || state.bootstrap?.default_provider || "",
+    view: state.view || "overview",
+  };
+  if (nav.view === "detail") {
+    nav.ticker = state.detail.ticker || "";
+    nav.subtab = state.subtab || "holdings";
+  }
+  return nav;
+}
+
+function navigationSignature(nav) {
+  return [nav?.providerId || "", nav?.view || "overview", nav?.ticker || "", nav?.subtab || ""].join("|");
+}
+
+function navigationUrl(nav) {
+  const url = new URL(window.location.href);
+  url.searchParams.set("provider", nav.providerId);
+  url.searchParams.set("view", nav.view);
+  if (nav.view === "detail" && nav.ticker) url.searchParams.set("ticker", nav.ticker);
+  else url.searchParams.delete("ticker");
+  if (nav.view === "detail" && nav.subtab && nav.subtab !== "holdings") {
+    url.searchParams.set("subtab", nav.subtab);
+  } else {
+    url.searchParams.delete("subtab");
+  }
+  url.hash = "";
+  return `${url.pathname}${url.search}`;
+}
+
+function commitNavigation(mode = "push") {
+  if (!window.history?.pushState) return;
+  const nav = navigationStateFromApp();
+  const current = window.history.state;
+  if (mode === "push" && current?.[NAVIGATION_STATE_KEY]
+      && navigationSignature(current) === navigationSignature(nav)) return;
+  const method = mode === "replace" ? "replaceState" : "pushState";
+  window.history[method](nav, "", navigationUrl(nav));
+}
+
+function navigationTargetFromLocation(historyState = null) {
+  const params = new URL(window.location.href).searchParams;
+  const saved = historyState?.[NAVIGATION_STATE_KEY] ? historyState : {};
+  return {
+    providerId: saved.providerId || params.get("provider") || "",
+    view: saved.view || params.get("view") || "overview",
+    ticker: saved.ticker || params.get("ticker") || "",
+    subtab: saved.subtab || params.get("subtab") || "holdings",
+  };
+}
+
+function normalizeNavigationTarget(raw = {}) {
+  const providerIds = new Set([...realProviderIds(), AGGREGATE_PROVIDER_ID]);
+  let providerId = providerIds.has(raw.providerId)
+    ? raw.providerId
+    : (state.bootstrap?.default_provider || realProviderIds()[0] || "");
+  let view = NAVIGATION_VIEWS.has(raw.view) ? raw.view : "overview";
+  if (isStaticMode() && view === "ops") view = "overview";
+  if (providerId === AGGREGATE_PROVIDER_ID && view !== "overview") {
+    providerId = state.bootstrap?.default_provider || realProviderIds()[0] || providerId;
+  }
+  return {
+    providerId,
+    view,
+    ticker: String(raw.ticker || ""),
+    subtab: DETAIL_SUBTABS.has(raw.subtab) ? raw.subtab : "holdings",
+  };
+}
+
 // ---- api ------------------------------------------------------------------
 
 async function apiGet(path) {
@@ -220,6 +307,10 @@ const v2 = {
     isStaticMode()
       ? staticClient.manifest(pid, ticker).then((manifest) => ({ ticker, manifest }))
       : apiGet(`/api/v2/providers/${enc(pid)}/etfs/${enc(ticker)}/manifest`),
+  search: (pid, q, scope = "all") =>
+    isStaticMode()
+      ? staticClient.search(pid, q, scope)
+      : apiGet(`/api/v2/providers/${enc(pid)}/search?q=${enc(q)}&scope=${enc(scope)}`),
   scheduler: (pid) => isStaticMode()
     ? Promise.resolve({
         running: false,
@@ -377,20 +468,26 @@ async function start() {
   try {
     launchOverlay.setStatus(isStaticMode() ? "공개 데이터 여는 중…" : "서버 연결 중…");
     state.bootstrap = await v2.bootstrap();
-    state.providerId = state.bootstrap.default_provider;
+    const initialNavigation = normalizeNavigationTarget(navigationTargetFromLocation(window.history.state));
+    state.providerId = initialNavigation.providerId;
+    state.view = initialNavigation.view;
+    state.subtab = initialNavigation.subtab;
+    state.detail.ticker = initialNavigation.ticker;
     renderProviderTabs();
     renderViewTabs();
     renderOwnerBadge();
     applyStaticModeUi();
-	    wireGlobalControls();
-	    wireDetailControls();
-	    wireOpsControls();
+    wireGlobalControls();
+    wireDetailControls();
+    wireOpsControls();
     wireSubtabs();
     wireLineupSort();
+    wireNavigationHistory();
+    commitNavigation("replace");
     const providerName = providerLabel(state.providerId) || state.providerId || "기본 펀드";
     launchOverlay.setStatus(`${providerName} 데이터 불러오는 중…`);
     launchOverlay.setHint("ETF 수가 많은 펀드(TIGER 등)는 첫 로딩이 최대 1~2분 걸릴 수 있습니다.");
-    await switchProvider(state.providerId);
+    await restoreNavigation(initialNavigation, { replace: true, forceProviderLoad: true });
     launchOverlay.dismiss();
   } catch (err) {
     launchOverlay.showError(err);
@@ -415,7 +512,7 @@ function renderProviderTabs() {
   $$("[data-pid]", host).forEach((btn) => {
     btn.setAttribute("aria-current", String(btn.dataset.pid === state.providerId));
     btn.classList.toggle("is-loading", btn.dataset.pid === state.loadingProvider);
-    btn.onclick = () => switchProvider(btn.dataset.pid);
+    btn.onclick = () => { switchProvider(btn.dataset.pid).catch(() => {}); };
   });
   // 상단 메타 텍스트도 동기화 — 로딩 중이면 어느 provider인지 즉시 인지 가능.
   const metaEl = bind("bootstrap_meta");
@@ -432,7 +529,7 @@ function renderViewTabs() {
       return;
     }
     btn.setAttribute("aria-current", String(btn.dataset.view === state.view));
-    btn.onclick = () => switchView(btn.dataset.view);
+    btn.onclick = () => { switchView(btn.dataset.view).catch(() => {}); };
   });
   $$("[data-view-pane]").forEach((pane) => {
     pane.hidden = pane.dataset.viewPane !== state.view;
@@ -443,7 +540,28 @@ function resetLineupVisible() {
   state.lineup.visible = LINEUP_PAGE_SIZE;
 }
 
-async function switchView(view) {
+function overviewStatusData(pid, dataState, error = "") {
+  return {
+    lineup: [],
+    etfSummaryRows: [],
+    recent_changes_feed: [],
+    recent_changes_window: state.recent.window,
+    summary: {
+      provider_id: pid,
+      provider_label: pid === AGGREGATE_PROVIDER_ID ? "관심 ETF" : providerLabel(pid),
+      data_state: dataState,
+      load_error: error,
+      etf_count: 0,
+      latest_snapshot_date: "-",
+      snapshot_count: 0,
+      change_row_count: 0,
+    },
+  };
+}
+
+async function switchView(view, { historyMode = "push", navEpoch = null } = {}) {
+  if (view === state.view && historyMode === "push") return;
+  const epoch = navEpoch ?? (historyMode === "none" ? navigationEpoch : beginNavigation());
   if (isStaticMode() && view === "ops") {
     state.view = "overview";
     renderViewTabs();
@@ -456,19 +574,37 @@ async function switchView(view) {
   if ((view === "ops" || view === "detail") && isAggregateMode()) {
     const fallback = state.bootstrap?.default_provider || realProviderIds()[0];
     if (fallback) {
-      await switchProvider(fallback);
+      await switchProvider(fallback, { historyMode: "none", navEpoch: epoch });
+      if (epoch !== navigationEpoch) return;
       toast(`${providerLabel(fallback)} 펀드로 전환되었습니다.`);
     }
   }
-	  state.view = view;
-	  renderViewTabs();
-	  if (view === "ops") loadScheduler();
-	}
+  state.view = view;
+  renderViewTabs();
+  if (historyMode !== "none") commitNavigation(historyMode);
+  if (view === "detail") refreshDetailPane();
+  if (view === "ops") loadScheduler();
+}
 
-async function switchProvider(pid) {
+async function switchProvider(pid, { historyMode = "push", navEpoch = null, force = false } = {}) {
+  const epoch = navEpoch ?? (historyMode === "none" ? navigationEpoch : beginNavigation());
+  if (!pid) return;
+  if (!force && pid === state.providerId && state.overview && !state.loadingProvider) {
+    if (historyMode !== "none") commitNavigation(historyMode);
+    return;
+  }
+  const previousPid = state.providerId;
+  const requestId = ++providerSwitchRequestId;
   state.providerId = pid;
   state.loadingProvider = pid;   // 클릭한 탭에 spinner + topbar 상태 표시
   resetLineupVisible();
+  resetLineupHoldingSearchResults();
+  if (previousPid && previousPid !== pid) {
+    state.detail.ticker = "";
+    state.overview = overviewStatusData(pid, "loading");
+    renderOverview();
+    initDetailControls();
+  }
   if (pid === AGGREGATE_PROVIDER_ID) {
     state.favorites = new Set();   // not meaningful in aggregate mode
     renderProviderTabs();
@@ -478,32 +614,100 @@ async function switchProvider(pid) {
       state.view = "overview";
       renderViewTabs();
     }
+    if (historyMode !== "none") commitNavigation(historyMode);
     try {
       await loadAggregate();
     } finally {
-      state.loadingProvider = null;
-      renderProviderTabs();
+      if (requestId === providerSwitchRequestId) {
+        state.loadingProvider = null;
+        renderProviderTabs();
+      }
     }
+    if (epoch === navigationEpoch && historyMode !== "none") commitNavigation("replace");
+    if (epoch === navigationEpoch) queueLineupHoldingSearch({ immediate: true });
     return;
   }
   state.favorites = readFavorites(pid);
   renderProviderTabs();
+  if (historyMode !== "none") commitNavigation(historyMode);
   try {
     // Only refresh the scheduler if the user is actually viewing it — every other
     // tab click would otherwise wait on an Ops-only network round trip.
     if (state.view === "ops") await Promise.all([loadOverview(), loadScheduler()]);
     else await loadOverview();
   } finally {
-    state.loadingProvider = null;
-    renderProviderTabs();
+    if (requestId === providerSwitchRequestId) {
+      state.loadingProvider = null;
+      renderProviderTabs();
+    }
   }
+  if (epoch === navigationEpoch && historyMode !== "none") commitNavigation("replace");
+  if (epoch === navigationEpoch) queueLineupHoldingSearch({ immediate: true });
+}
+
+async function restoreNavigation(rawTarget, { replace = false, forceProviderLoad = false } = {}) {
+  const target = normalizeNavigationTarget(rawTarget);
+  const epoch = beginNavigation();
+  const providerChanged = target.providerId !== state.providerId;
+  state.view = target.view;
+  state.subtab = target.subtab;
+  renderViewTabs();
+  renderSubtabs();
+
+  if (providerChanged || forceProviderLoad || !state.overview) {
+    await switchProvider(target.providerId, {
+      historyMode: "none",
+      navEpoch: epoch,
+      force: forceProviderLoad || !state.overview,
+    });
+    if (epoch !== navigationEpoch) return;
+  }
+
+  state.view = target.view;
+  state.subtab = target.subtab;
+  if (target.view === "detail") {
+    const select = $("[data-control='etf']");
+    const hasRequestedTicker = Boolean(target.ticker && select
+      && Array.from(select.options).some((option) => option.value === target.ticker));
+    if (hasRequestedTicker) {
+      state.detail.ticker = target.ticker;
+      select.value = target.ticker;
+    } else if (select?.value) {
+      state.detail.ticker = select.value;
+    }
+    await refreshDatesForTicker();
+    if (epoch !== navigationEpoch) return;
+  }
+
+  renderViewTabs();
+  switchSubtab(target.subtab, { historyMode: "none", navEpoch: epoch, refresh: false });
+  if (target.view === "detail") await refreshDetailPane();
+  else if (target.view === "ops" && !providerChanged) await loadScheduler();
+  if (epoch !== navigationEpoch) return;
+  if (replace) commitNavigation("replace");
+}
+
+function wireNavigationHistory() {
+  window.addEventListener("popstate", (event) => {
+    const target = navigationTargetFromLocation(event.state);
+    restoreNavigation(target).catch((err) => toast(err.message, { error: true }));
+  });
 }
 
 async function loadAggregate({ force = false } = {}) {
+  const generation = ++aggregateLoadGeneration;
+  const requestedPid = state.providerId;
+  if (requestedPid !== AGGREGATE_PROVIDER_ID) return;
   const window = state.recent.window;
+  const isCurrent = () => (
+    generation === aggregateLoadGeneration
+    && state.providerId === requestedPid
+    && state.recent.window === window
+  );
   if (!force) {
     const cached = state.aggregateCache;
     if (cached && cached.window === window && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) {
+      if (!isCurrent()) return;
       state.recent.visible = RECENT_PAGE_SIZE;
       resetLineupVisible();
       state.aggregate = cached.data;
@@ -517,7 +721,9 @@ async function loadAggregate({ force = false } = {}) {
     resetLineupVisible();
     const pids = realProviderIds();
     if (pids.length === 0) {
-      state.aggregate = { etfSummaryRows: [], recent_changes_feed: [], summary: {} };
+      if (!isCurrent()) return;
+      state.aggregate = overviewStatusData(requestedPid, "ready");
+      state.overview = state.aggregate;
       renderOverview();
       return;
     }
@@ -527,12 +733,19 @@ async function loadAggregate({ force = false } = {}) {
       pids.map(async (pid) => {
         const key = `${pid}|${window}`;
         const cached = state.overviewCache.get(key);
-        if (cached && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) return { pid, data: cached.data };
+        if (cached && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) {
+          return { pid, data: cached.data, cacheKey: key, shouldCache: false };
+        }
         const data = await v2.overview(pid, { window });
-        state.overviewCache.set(key, { data, fetchedAt: Date.now() });
-        return { pid, data };
+        return { pid, data, cacheKey: key, shouldCache: true };
       })
     );
+    if (!isCurrent()) return;
+    for (const result of overviews) {
+      if (result.shouldCache) {
+        state.overviewCache.set(result.cacheKey, { data: result.data, fetchedAt: Date.now() });
+      }
+    }
     const allFavs = readAllFavorites();
     const etfRows = [];
     const feedRows = [];
@@ -559,10 +772,11 @@ async function loadAggregate({ force = false } = {}) {
       }
     }
     feedRows.sort((a, b) => (b.snapshot_date || "").localeCompare(a.snapshot_date || ""));
-    state.aggregate = {
+    const aggregateData = {
+      lineup: etfRows,
       etfSummaryRows: etfRows,
       recent_changes_feed: feedRows,
-      recent_changes_window: state.recent.window,
+      recent_changes_window: window,
       recent_changes_truncated: truncated,
       recent_changes_row_cap: rowCap,
       summary: {
@@ -572,13 +786,21 @@ async function loadAggregate({ force = false } = {}) {
         change_row_count: changeRowTotal,
       },
     };
-    state.aggregateCache = { data: state.aggregate, fetchedAt: Date.now(), window };
-    state.overview = state.aggregate;
+    if (!isCurrent()) return;
+    state.aggregateCache = { data: aggregateData, fetchedAt: Date.now(), window };
+    state.aggregate = aggregateData;
+    state.overview = aggregateData;
     renderOverview();
     // Detail view is provider-scoped; we re-init the ETF dropdown when the user
     // clicks a row (switchProvider then runs initDetailControls in loadOverview).
   } catch (err) {
+    if (!isCurrent()) return;
+    const errorData = overviewStatusData(requestedPid, "load_error", err?.message || String(err));
+    state.aggregate = errorData;
+    state.overview = errorData;
+    renderOverview();
     toast(err.message, { error: true });
+    throw err;
   }
 }
 
@@ -626,7 +848,13 @@ function overviewEmptyHtml() {
   const { version, generatedAt } = overviewBuildMeta(summary);
   let title = "아직 ETF 데이터가 생성되지 않았습니다.";
   let detail = "Operations에서 업데이트 상태를 확인하고 데이터를 생성하세요.";
-  if (dataState === "generated_empty") {
+  if (dataState === "loading") {
+    title = `${summary.provider_label || "펀드"} 데이터를 불러오는 중입니다.`;
+    detail = "잠시만 기다려 주세요.";
+  } else if (dataState === "load_error") {
+    title = `${summary.provider_label || "펀드"} 데이터를 불러오지 못했습니다.`;
+    detail = summary.load_error || "연결 상태를 확인한 뒤 다시 시도하세요.";
+  } else if (dataState === "generated_empty") {
     title = "데이터 생성은 완료됐지만 ETF가 0건입니다.";
     detail = isStaticMode()
       ? "이번 공개 생성 결과가 정상 0건입니다. 다음 생성 뒤 다시 확인하세요."
@@ -640,9 +868,12 @@ function overviewEmptyHtml() {
   } else if (!state.bootstrap?.owner) {
     detail = "먼저 Operations에서 이 PC를 담당 PC로 지정한 뒤 업데이트를 실행하세요.";
   }
-  const action = isStaticMode()
-    ? ""
-    : '<button class="btn-ghost btn-sm" data-action="open-operations">Operations로 이동</button>';
+  let action = "";
+  if (dataState === "load_error") {
+    action = '<button class="btn-ghost btn-sm" data-action="retry-overview">다시 시도</button>';
+  } else if (dataState !== "loading" && !isStaticMode()) {
+    action = '<button class="btn-ghost btn-sm" data-action="open-operations">Operations로 이동</button>';
+  }
   return `<div class="empty-state">
     <strong>${escape(title)}</strong>
     <span>${escape(detail)}</span>
@@ -652,11 +883,142 @@ function overviewEmptyHtml() {
 }
 
 function wireOverviewEmptyAction(root) {
-  const button = root?.querySelector?.("[data-action='open-operations']");
-  if (button) button.onclick = () => switchView("ops");
+  const operationsButton = root?.querySelector?.("[data-action='open-operations']");
+  if (operationsButton) operationsButton.onclick = () => switchView("ops").catch(() => {});
+  const retryButton = root?.querySelector?.("[data-action='retry-overview']");
+  if (retryButton) {
+    retryButton.onclick = () => {
+      state.overview = overviewStatusData(state.providerId, "loading");
+      renderOverview();
+      switchProvider(state.providerId, {
+        historyMode: "none",
+        navEpoch: navigationEpoch,
+        force: true,
+      }).catch(() => {});
+    };
+  }
+}
+
+let lineupHoldingSearchTimer = null;
+
+function normalizeLineupSearchQuery(value) {
+  return String(value ?? "").normalize("NFC").trim().replace(/\s+/g, " ");
+}
+
+function normalizeLineupSearchText(value) {
+  return normalizeLineupSearchQuery(value).toLocaleLowerCase("ko-KR");
+}
+
+function lineupSearchKey(pid, ticker) {
+  return `${pid || ""}::${ticker || ""}`;
+}
+
+function providerIdForLineupRow(row) {
+  return isAggregateMode() ? row.provider_id : state.providerId;
+}
+
+function rowMatchesLineupProduct(row, query) {
+  const needle = normalizeLineupSearchText(query);
+  if (!needle) return true;
+  return normalizeLineupSearchText(`${row?.name || ""} ${row?.ticker || ""}`).includes(needle);
+}
+
+function resetLineupHoldingSearchResults() {
+  clearTimeout(lineupHoldingSearchTimer);
+  state.lineup.holdingSearchRequestId += 1;
+  state.lineup.holdingSearchMatches = new Set();
+  state.lineup.holdingSearchLoading = Boolean(state.lineup.holdingQuery);
+  state.lineup.holdingSearchError = "";
+}
+
+function lineupSearchProviderIds() {
+  if (!isAggregateMode()) return state.providerId ? [state.providerId] : [];
+  const represented = (state.overview?.etfSummaryRows || [])
+    .map((row) => row.provider_id)
+    .filter((pid) => pid && pid !== AGGREGATE_PROVIDER_ID);
+  return [...new Set(represented)];
+}
+
+async function runLineupHoldingSearch(query, requestId) {
+  const providerIds = lineupSearchProviderIds();
+  if (providerIds.length === 0) {
+    if (requestId !== state.lineup.holdingSearchRequestId) return;
+    state.lineup.holdingSearchLoading = false;
+    renderLineup();
+    return;
+  }
+  const results = await Promise.allSettled(
+    providerIds.map(async (pid) => ({ pid, response: await v2.search(pid, query, "holdings") }))
+  );
+  if (requestId !== state.lineup.holdingSearchRequestId
+      || query !== normalizeLineupSearchQuery(state.lineup.holdingQuery)) return;
+  const matches = new Set();
+  let failures = 0;
+  for (const result of results) {
+    if (result.status !== "fulfilled") {
+      failures += 1;
+      continue;
+    }
+    const { pid, response } = result.value;
+    for (const match of (response?.matches || [])) {
+      matches.add(lineupSearchKey(response?.provider_id || pid, match?.ticker));
+    }
+  }
+  state.lineup.holdingSearchMatches = matches;
+  state.lineup.holdingSearchLoading = false;
+  state.lineup.holdingSearchError = failures
+    ? (failures === results.length ? "구성종목 검색에 실패했습니다." : "일부 펀드의 구성종목 검색에 실패했습니다.")
+    : "";
+  renderLineup();
+}
+
+function queueLineupHoldingSearch({ immediate = false } = {}) {
+  clearTimeout(lineupHoldingSearchTimer);
+  const query = normalizeLineupSearchQuery(state.lineup.holdingQuery);
+  if (!query) {
+    state.lineup.holdingSearchLoading = false;
+    state.lineup.holdingSearchError = "";
+    state.lineup.holdingSearchMatches = new Set();
+    return;
+  }
+  const requestId = ++state.lineup.holdingSearchRequestId;
+  state.lineup.holdingSearchLoading = true;
+  const run = () => runLineupHoldingSearch(query, requestId).catch((err) => {
+    if (requestId !== state.lineup.holdingSearchRequestId) return;
+    state.lineup.holdingSearchLoading = false;
+    state.lineup.holdingSearchError = err?.message || "구성종목 검색에 실패했습니다.";
+    renderLineup();
+  });
+  if (immediate) run();
+  else lineupHoldingSearchTimer = setTimeout(run, 220);
+}
+
+function wireLineupSearch() {
+  const productInput = $("[data-control='lineup_product_search']");
+  if (productInput) {
+    productInput.value = state.lineup.productQuery;
+    productInput.addEventListener("input", () => {
+      state.lineup.productQuery = normalizeLineupSearchQuery(productInput.value);
+      resetLineupVisible();
+      renderLineup();
+    });
+  }
+
+  const holdingInput = $("[data-control='lineup_holding_search']");
+  if (holdingInput) {
+    holdingInput.value = state.lineup.holdingQuery;
+    holdingInput.addEventListener("input", () => {
+      state.lineup.holdingQuery = normalizeLineupSearchQuery(holdingInput.value);
+      resetLineupVisible();
+      resetLineupHoldingSearchResults();
+      renderLineup();
+      queueLineupHoldingSearch();
+    });
+  }
 }
 
 function wireGlobalControls() {
+  wireLineupSearch();
   const windowSelect = $("[data-control='recent_window']");
   if (windowSelect) {
     windowSelect.value = String(state.recent.window);
@@ -664,8 +1026,12 @@ function wireGlobalControls() {
       const next = Number(windowSelect.value) || RECENT_WINDOW_DEFAULT;
       if (next === state.recent.window) return;
       state.recent.window = next;
-      if (isAggregateMode()) await loadAggregate();
-      else await loadOverview();
+      try {
+        if (isAggregateMode()) await loadAggregate();
+        else await loadOverview();
+      } catch {
+        // The loader has already rendered a truthful error state and toast.
+      }
     });
   }
   const moreBtn = document.querySelector("[data-action='recent_changes_more']");
@@ -712,31 +1078,45 @@ function wireGlobalControls() {
 
 function wireSubtabs() {
   $$(".tab[data-subtab]").forEach((btn) => {
-    btn.setAttribute("aria-current", String(btn.dataset.subtab === state.subtab));
     btn.onclick = () => switchSubtab(btn.dataset.subtab);
+  });
+  renderSubtabs();
+}
+
+function renderSubtabs() {
+  $$(".tab[data-subtab]").forEach((btn) => {
+    btn.setAttribute("aria-current", String(btn.dataset.subtab === state.subtab));
+  });
+  $$("[data-subpane]").forEach((pane) => {
+    pane.hidden = pane.dataset.subpane !== state.subtab;
   });
 }
 
-function switchSubtab(name) {
+function switchSubtab(name, { historyMode = "push", navEpoch = null, refresh = true } = {}) {
+  if (!DETAIL_SUBTABS.has(name)) name = "holdings";
+  if (navEpoch == null && historyMode !== "none") beginNavigation();
   state.subtab = name;
-  $$(".tab[data-subtab]").forEach((btn) => {
-    btn.setAttribute("aria-current", String(btn.dataset.subtab === name));
-  });
-  $$("[data-subpane]").forEach((pane) => {
-    pane.hidden = pane.dataset.subpane !== name;
-  });
-  refreshDetailPane();
+  renderSubtabs();
+  if (historyMode !== "none" && state.view === "detail") commitNavigation(historyMode);
+  if (refresh) refreshDetailPane();
 }
 
 // ---- Overview view --------------------------------------------------------
 
 async function loadOverview({ force = false } = {}) {
+  const generation = ++overviewLoadGeneration;
   const pid = state.providerId;
   const window = state.recent.window;
   const cacheKey = `${pid}|${window}`;
+  const isCurrent = () => (
+    generation === overviewLoadGeneration
+    && state.providerId === pid
+    && state.recent.window === window
+  );
   if (!force) {
     const cached = state.overviewCache.get(cacheKey);
     if (cached && (Date.now() - cached.fetchedAt) < OVERVIEW_CACHE_TTL_MS) {
+      if (!isCurrent()) return;
       state.recent.visible = RECENT_PAGE_SIZE;
       resetLineupVisible();
       state.overview = cached.data;
@@ -749,13 +1129,18 @@ async function loadOverview({ force = false } = {}) {
     state.recent.visible = RECENT_PAGE_SIZE;
     resetLineupVisible();
     const data = await v2.overview(pid, { window });
+    if (!isCurrent()) return;
     state.overviewCache.set(cacheKey, { data, fetchedAt: Date.now() });
-    if (state.providerId !== pid) return;   // user already switched away
     state.overview = data;
     renderOverview();
     initDetailControls();
   } catch (err) {
+    if (!isCurrent()) return;
+    state.overview = overviewStatusData(pid, "load_error", err?.message || String(err));
+    renderOverview();
+    initDetailControls();
     toast(err.message, { error: true });
+    throw err;
   }
 }
 
@@ -859,16 +1244,51 @@ function renderLineup() {
   const aggregate = isAggregateMode();
   const allRows = (o.etfSummaryRows || []);
   const favSet = state.favorites;
-  const filtered = aggregate
+  const favoritesFiltered = aggregate
     ? allRows
     : (state.lineup.favoritesOnly ? allRows.filter((r) => favSet.has(r.ticker)) : allRows);
+  const productQuery = normalizeLineupSearchQuery(state.lineup.productQuery);
+  const holdingQuery = normalizeLineupSearchQuery(state.lineup.holdingQuery);
+  const productFiltered = productQuery
+    ? favoritesFiltered.filter((row) => rowMatchesLineupProduct(row, productQuery))
+    : favoritesFiltered;
+  const filtered = holdingQuery
+    ? productFiltered.filter((row) => (
+        state.lineup.holdingSearchMatches.has(lineupSearchKey(providerIdForLineupRow(row), row.ticker))
+      ))
+    : productFiltered;
   const rows = sortLineupRows(filtered);
   const visibleCount = Math.max(LINEUP_PAGE_SIZE, Math.min(state.lineup.visible, rows.length));
   const visibleRows = rows.slice(0, visibleCount);
+  const overviewDataState = o.summary?.data_state || "";
 
   bind("lineup_count").textContent = rows.length > visibleRows.length
     ? `${nf.format(visibleRows.length)} / ${nf.format(rows.length)}`
     : nf.format(rows.length);
+  const searchStatus = bind("lineup_search_status");
+  if (searchStatus) {
+    searchStatus.classList.toggle(
+      "error",
+      Boolean(state.lineup.holdingSearchError) || overviewDataState === "load_error",
+    );
+    if (overviewDataState === "loading") {
+      searchStatus.textContent = "데이터를 불러오는 중입니다.";
+    } else if (overviewDataState === "load_error") {
+      searchStatus.textContent = "데이터를 불러오지 못해 검색할 수 없습니다.";
+    } else if (!productQuery && !holdingQuery) {
+      searchStatus.textContent = "상품명·코드와 최신 구성종목을 각각 검색할 수 있습니다.";
+    } else if (state.lineup.holdingSearchLoading) {
+      searchStatus.textContent = `${nf.format(rows.length)}건 · 최신 구성종목 검색 중…`;
+    } else if (state.lineup.holdingSearchError) {
+      searchStatus.textContent = `${nf.format(rows.length)}건 · ${state.lineup.holdingSearchError}`;
+    } else if (productQuery && holdingQuery) {
+      searchStatus.textContent = `${nf.format(rows.length)}건 · 두 조건을 모두 만족`;
+    } else if (productQuery) {
+      searchStatus.textContent = `${nf.format(rows.length)}건 · 상품명·코드 검색 결과`;
+    } else {
+      searchStatus.textContent = `${nf.format(rows.length)}건 · 구성종목 검색 결과`;
+    }
+  }
   const favCountEl = bind("favorites_count");
   if (favCountEl) {
     const total = aggregate
@@ -887,9 +1307,24 @@ function renderLineup() {
 
   const body = bind("lineup_body");
   const colspan = aggregate ? 10 : 9;
-  const emptyMsg = aggregate
-    ? "관심 ETF 없음 — 펀드 탭에서 별을 눌러 추가하세요"
-    : (state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : overviewEmptyHtml());
+  let emptyMsg;
+  if (overviewDataState === "loading" || overviewDataState === "load_error") {
+    emptyMsg = overviewEmptyHtml();
+  } else if (productQuery || holdingQuery) {
+    if (state.lineup.holdingSearchLoading) {
+      emptyMsg = "구성종목을 검색 중입니다.";
+    } else if (productQuery && holdingQuery) {
+      emptyMsg = `“${escape(productQuery)}” 상품명·코드 및 “${escape(holdingQuery)}” 구성종목 조건을 모두 만족하는 ETF가 없습니다.`;
+    } else if (productQuery) {
+      emptyMsg = `“${escape(productQuery)}” 상품명·코드 검색 결과가 없습니다.`;
+    } else {
+      emptyMsg = `“${escape(holdingQuery)}” 구성종목 검색 결과가 없습니다.`;
+    }
+  } else if (aggregate) {
+    emptyMsg = "관심 ETF 없음 — 펀드 탭에서 별을 눌러 추가하세요";
+  } else {
+    emptyMsg = state.lineup.favoritesOnly ? "관심 ETF 없음 — 별을 눌러 추가하세요" : overviewEmptyHtml();
+  }
   body.innerHTML = rows.length === 0
     ? `<tr><td colspan="${colspan}" class="empty">${emptyMsg}</td></tr>`
     : lineupRowsHtml({
@@ -924,7 +1359,7 @@ function renderLineup() {
         // Aggregate slice depends on the favorites set we just mutated — bust its cache
         // so the next render reflects the toggle instead of showing the stale snapshot.
         state.aggregateCache = null;
-        loadAggregate({ force: true });
+        loadAggregate({ force: true }).catch(() => {});
       } else {
         state.favorites = readFavorites(pid);
         renderLineup();
@@ -935,19 +1370,24 @@ function renderLineup() {
 
   $$("tr[data-row-ticker]", body).forEach((tr) => {
     const openDetail = async () => {
+      const epoch = beginNavigation();
       const ticker = tr.dataset.rowTicker;
       const pid = tr.dataset.rowPid;
       if (aggregate && pid && pid !== state.providerId) {
-        await switchProvider(pid);
+        await switchProvider(pid, { historyMode: "none", navEpoch: epoch });
+        if (epoch !== navigationEpoch) return;
       }
       state.detail.ticker = ticker;
       const select = $("[data-control='etf']");
       if (select) select.value = ticker;
       await refreshDatesForTicker();
-      switchView("detail");
+      if (epoch !== navigationEpoch) return;
+      await switchView("detail", { historyMode: "push", navEpoch: epoch });
       refreshDetailPane();
     };
-    $$("td.clickable", tr).forEach((td) => { td.onclick = openDetail; });
+    $$("td.clickable", tr).forEach((td) => {
+      td.onclick = () => { openDetail().catch(() => {}); };
+    });
   });
 
   renderLineupSortIndicators();
@@ -997,11 +1437,13 @@ function renderRecentChanges() {
   const countEl = bind("recent_changes_count");
   if (countEl) countEl.textContent = nf.format(total);
 
-  const noRecentMessage = aggregate || favOnly
-    ? "관심 ETF의 최근 변화가 없습니다."
-    : (Number(o.summary?.etf_count || 0) === 0
-        ? overviewEmptyHtml()
-        : `최근 ${state.recent.window}거래일에 편입·편출·액티브 매매 변화가 없습니다.`);
+  const noRecentMessage = o.summary?.data_state === "loading" || o.summary?.data_state === "load_error"
+    ? overviewEmptyHtml()
+    : (aggregate || favOnly
+        ? "관심 ETF의 최근 변화가 없습니다."
+        : (Number(o.summary?.etf_count || 0) === 0
+            ? overviewEmptyHtml()
+            : `최근 ${state.recent.window}거래일에 편입·편출·액티브 매매 변화가 없습니다.`));
   feed.innerHTML = total === 0
     ? `<div class="empty">${noRecentMessage}</div>`
     : (() => {
@@ -1108,7 +1550,10 @@ async function availableDates(ticker) {
 }
 
 async function refreshDatesForTicker() {
-  const dates = await availableDates(state.detail.ticker);
+  const pid = state.providerId;
+  const ticker = state.detail.ticker;
+  const dates = await availableDates(ticker);
+  if (state.providerId !== pid || state.detail.ticker !== ticker) return false;
   const latest = dates[dates.length - 1] || "";
   const first = dates[0] || "";
   const setOptions = (el, selected) => {
@@ -1123,9 +1568,11 @@ async function refreshDatesForTicker() {
   state.detail.date_single = latest;
   state.detail.date_from = first;
   state.detail.date_to = latest;
+  return true;
 }
 
 let qDebounceTimer = null;
+let detailRefreshRequestId = 0;
 
 function wireDetailControls() {
   const controls = [
@@ -1136,8 +1583,11 @@ function wireDetailControls() {
     if (!el) return;
     el.addEventListener("change", async () => {
       if (name === "etf") {
+        const epoch = beginNavigation();
         state.detail.ticker = el.value;
         await refreshDatesForTicker();
+        if (epoch !== navigationEpoch) return;
+        if (state.view === "detail") commitNavigation("replace");
       } else if (name === "mode") {
         state.detail.mode = el.value;
         applyModeVisibility();
@@ -1178,53 +1628,77 @@ function applyModeVisibility() {
 async function refreshDetailPane() {
   if (state.view !== "detail") return;
   if (!state.detail.ticker) return;
+  const requestId = ++detailRefreshRequestId;
   const pid = state.providerId;
   const ticker = state.detail.ticker;
+  const subtab = state.subtab;
   const d = state.detail;
+  const stillCurrent = () => (
+    requestId === detailRefreshRequestId
+    && state.view === "detail"
+    && state.providerId === pid
+    && state.detail.ticker === ticker
+    && state.subtab === subtab
+  );
   try {
-    if (state.subtab === "holdings") {
+    if (subtab === "holdings") {
       const date = d.mode === "single" ? d.date_single : d.date_to;
       const key = `${pid}|${ticker}|${date}`;
       if (d.snapshotKey !== key || !d.snapshot) {
-        d.snapshot = await v2.snapshot(pid, ticker, date);
+        const snapshot = await v2.snapshot(pid, ticker, date);
+        if (!stillCurrent()) return;
+        d.snapshot = snapshot;
         d.snapshotKey = key;
       }
+      if (!stillCurrent()) return;
       renderDetailKpis(d.snapshot);
       renderHoldings(d.snapshot);
-    } else if (state.subtab === "changes") {
+    } else if (subtab === "changes") {
       const params = buildChangesParams();
       const key = `${pid}|${ticker}|${new URLSearchParams(params).toString()}`;
       if (d.changesKey !== key || !d.changes) {
-        d.changes = await v2.changes(pid, ticker, params);
+        const changes = await v2.changes(pid, ticker, params);
+        if (!stillCurrent()) return;
+        d.changes = changes;
         d.changesKey = key;
       }
+      if (!stillCurrent()) return;
       renderChanges(d.changes);
       // KPI strip uses snapshot data; populate lazily so we don't refetch when cached.
       const snapDate = params.to || d.date_single;
       const snapKey = `${pid}|${ticker}|${snapDate}`;
       if (d.snapshotKey !== snapKey || !d.snapshot) {
-        d.snapshot = await v2.snapshot(pid, ticker, snapDate);
+        const snapshot = await v2.snapshot(pid, ticker, snapDate);
+        if (!stillCurrent()) return;
+        d.snapshot = snapshot;
         d.snapshotKey = snapKey;
       }
+      if (!stillCurrent()) return;
       renderDetailKpis(d.snapshot);
-    } else if (state.subtab === "timeline") {
+    } else if (subtab === "timeline") {
       const params = buildChangesParams();
       const key = `${pid}|${ticker}|${new URLSearchParams(params).toString()}`;
       if (d.timelineKey !== key || !d.timeline) {
-        d.timeline = await v2.timeline(pid, ticker, params);
+        const timeline = await v2.timeline(pid, ticker, params);
+        if (!stillCurrent()) return;
+        d.timeline = timeline;
         d.timelineKey = key;
       }
+      if (!stillCurrent()) return;
       renderTimeline(d.timeline);
-    } else if (state.subtab === "manifest") {
+    } else if (subtab === "manifest") {
       const key = `${pid}|${ticker}`;
       if (d.manifestKey !== key || !d.manifest) {
-        d.manifest = await v2.manifest(pid, ticker);
+        const manifest = await v2.manifest(pid, ticker);
+        if (!stillCurrent()) return;
+        d.manifest = manifest;
         d.manifestKey = key;
       }
+      if (!stillCurrent()) return;
       renderManifest(d.manifest);
     }
   } catch (err) {
-    toast(err.message, { error: true });
+    if (stillCurrent()) toast(err.message, { error: true });
   }
 }
 

@@ -1,1 +1,1 @@
-{"ticker":"0122W0","changes":[]}
+{"ticker":"0122W0","changes":[{"snapshot_date":"2026-07-13","previous_snapshot_date":"2026-07-10","change_type":"비중축소","constituent_code":"KR350106GEB6","constituent_name":"한국전력1440","previous_weight":6.19,"weight":5.97,"weight_delta":-0.22000000000000064,"active_signal_ratio":0.9637899427651192,"active_change_type":"drift"}]}

@@ -334,6 +334,25 @@ code { font-family: var(--font-mono); font-size: 0.92em; }
 .lineup-more-row .btn-ghost {
   min-width: 140px;
 }
+.lineup-search-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s-3);
+  min-width: 0;
+}
+.lineup-search-field {
+  min-width: 0;
+  max-width: none;
+}
+.lineup-search-field input {
+  width: 100%;
+}
+.lineup-search-status {
+  grid-column: 1 / -1;
+  min-width: 0;
+  text-align: left;
+}
+.lineup-search-status.error { color: var(--positive); }
 .table thead th.star-col,
 .table tbody td.star-col {
   width: 36px;
@@ -859,9 +878,9 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     line-height: var(--lh-tight);
   }
   .row-actions,
-  .toolbar {
+  .toolbar,
+  .lineup-search-row {
     width: 100%;
-    align-items: stretch;
     gap: var(--s-2);
     min-width: 0;
   }
@@ -872,6 +891,13 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
     flex: 1 1 160px;
   }
   .field.grow { min-width: 100%; }
+  .lineup-search-field {
+    max-width: none;
+    min-width: 0;
+  }
+  .lineup-search-status {
+    text-align: left;
+  }
   .field input,
   .field select,
   .row-actions button,
@@ -1066,6 +1092,16 @@ input[type="checkbox"].toggle-switch:checked::before { transform: translateX(16p
   .toolbar .btn-ghost,
   .row-actions button {
     flex-basis: 100%;
+  }
+  .lineup-search-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--s-1);
+  }
+  .lineup-search-field {
+    width: 100%;
+  }
+  .lineup-search-status {
+    grid-column: auto;
   }
   .kpi-strip { grid-template-columns: 1fr; }
   [data-view-pane="overview"] > .card:first-child .row-actions {

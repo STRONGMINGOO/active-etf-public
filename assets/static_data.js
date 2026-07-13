@@ -1,5 +1,13 @@
 const enc = encodeURIComponent;
 
+function compactNfcText(value) {
+  return String(value ?? "").normalize("NFC").trim().replace(/\s+/g, " ");
+}
+
+function normalizeSearchText(value) {
+  return compactNfcText(value).toLocaleLowerCase("ko-KR");
+}
+
 export function createStaticDataClient({ base, recentWindowDefault }) {
   const dataBase = String(base || "").replace(/\/+$/, "");
   const cache = new Map();
@@ -96,5 +104,29 @@ export function createStaticDataClient({ base, recentWindowDefault }) {
     return legacyEtfBundle(pid, ticker).then((bundle) => bundle.manifest || []);
   }
 
-  return { json, overview, dates, snapshot, changes, manifest };
+  async function search(pid, q, scope = "all") {
+    const query = compactNfcText(q);
+    if (!query) return { provider_id: pid, query, matches: [] };
+    const needle = normalizeSearchText(query);
+    const searchScope = ["all", "product", "holdings"].includes(scope) ? scope : "all";
+    const index = await json("search-index.json");
+    const rows = Array.isArray(index?.providers?.[pid]) ? index.providers[pid] : [];
+    const seen = new Set();
+    const matches = [];
+    for (const row of rows) {
+      const ticker = String(row?.ticker || "");
+      const productTerms = row?.product_terms ?? `${ticker} ${row?.name || ""}`;
+      const holdingTerms = row?.holding_terms ?? row?.terms ?? "";
+      const terms = searchScope === "product"
+        ? productTerms
+        : (searchScope === "holdings" ? holdingTerms : row?.terms ?? `${productTerms} ${holdingTerms}`);
+      const haystack = normalizeSearchText(Array.isArray(terms) ? terms.join(" ") : terms);
+      if (!ticker || seen.has(ticker) || !haystack.includes(needle)) continue;
+      seen.add(ticker);
+      matches.push({ ticker, name: String(row?.name || "") });
+    }
+    return { provider_id: pid, query, matches };
+  }
+
+  return { json, overview, dates, snapshot, changes, manifest, search };
 }

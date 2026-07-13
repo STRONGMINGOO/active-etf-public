@@ -26,6 +26,12 @@ export const state = {
     sortKey: "nav_total",
     sortDir: "desc",
     visible: LINEUP_PAGE_SIZE,
+    productQuery: "",
+    holdingQuery: "",
+    holdingSearchMatches: new Set(),
+    holdingSearchLoading: false,
+    holdingSearchError: "",
+    holdingSearchRequestId: 0,
   },
   favorites: new Set(),
   detail: {
